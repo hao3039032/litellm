@@ -36,16 +36,10 @@ class ZAIChatConfig(OpenAIGPTConfig):
         return messages, tools
 
     def get_supported_openai_params(self, model: str) -> list:
-        base_params = [
-            "max_tokens",
-            "stream",
-            "stream_options",
-            "temperature",
-            "top_p",
-            "stop",
-            "tools",
-            "tool_choice",
-        ]
+        # ZAI is OpenAI-compatible, so start from the full OpenAI supported
+        # params (frequency_penalty, parallel_tool_calls, response_format,
+        # seed, n, ...) and add reasoning params for reasoning-capable models.
+        base_params = super().get_supported_openai_params(model)
 
         import litellm
 

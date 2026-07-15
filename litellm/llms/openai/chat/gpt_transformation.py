@@ -190,6 +190,13 @@ class OpenAIGPTConfig(BaseLLMModelInfo, BaseConfig):
             model_specific_params.append(
                 "user"
             )  # user is not a param supported by all openai-compatible endpoints - e.g. azure ai
+        else:
+            # OpenAI-compatible endpoints that are not native OpenAI models
+            # (e.g. Zhipu GLM behind a proxy) accept reasoning params at the
+            # request body top level. Expose them so they are not rejected by
+            # param validation. They are routed into `extra_body` by
+            # `_map_openai_params`.
+            model_specific_params.extend(_REASONING_PARAMS)
         return base_params + model_specific_params
 
     def _map_openai_params(

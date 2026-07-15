@@ -45,6 +45,7 @@ class ZAIChatConfig(OpenAIGPTConfig):
             "stop",
             "tools",
             "tool_choice",
+            "parallel_tool_calls",
         ]
 
         import litellm

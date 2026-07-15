@@ -71,12 +71,6 @@ else:
     LiteLLMLoggingObj = Any
 
 
-# Reasoning params that some OpenAI-compatible endpoints (e.g. Zhipu GLM) accept
-# at the top level of the request body, but which the OpenAI Python SDK rejects as
-# kwargs. Route them into `extra_body` so they are sent as top-level body fields.
-_REASONING_PARAMS = ("thinking", "reasoning_effort")
-
-
 class OpenAIGPTConfig(BaseLLMModelInfo, BaseConfig):
     """
     Reference: https://platform.openai.com/docs/api-reference/chat/create
@@ -212,11 +206,6 @@ class OpenAIGPTConfig(BaseLLMModelInfo, BaseConfig):
         """
         supported_openai_params = self.get_supported_openai_params(model)
         for param, value in non_default_params.items():
-            if param in _REASONING_PARAMS:
-                # Route reasoning params into extra_body (see module-level note),
-                # never pass them as SDK kwargs.
-                optional_params.setdefault("extra_body", {})[param] = value
-                continue
             if param in supported_openai_params:
                 optional_params[param] = value
         return optional_params

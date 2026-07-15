@@ -1,18 +1,12 @@
 # Minimal patch image based on upstream v1.92.0 release.
-# Applies file patches for glm-5.2 + thinking support:
+# Applies 3 file patches for zai/glm-5.2 + thinking support:
 #   1) zai provider transformation: wrap thinking/reasoning_effort into extra_body (PR #31085)
 #   2) backup model cost map: add zai/glm-5.2 entry (PR #31077 missed the backup file)
 #   3) force local backup usage (upstream raw fetch lacks zai/glm-5.2)
-#   4) openai provider transformation: route thinking/reasoning_effort into extra_body
-#      so OpenAI-compatible endpoints (Zhipu GLM via proxy) accept them without the
-#      SDK choking on unknown kwargs.
 FROM ghcr.io/berriai/litellm-database:v1.92.0
 
 # Patch 1: zai provider transformation
 COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
-
-# Patch 4: openai provider transformation
-COPY litellm/llms/openai/chat/gpt_transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/openai/chat/gpt_transformation.py
 
 # Patch 2: backup model cost map (includes zai/glm-5.2)
 COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json

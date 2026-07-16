@@ -240,6 +240,46 @@ def test_bedrock_mantle_provider_fields():
     assert fields_by_key["api_base"]["field_type"] == "text"
 
 
+def test_zai_provider_fields():
+    """Z.AI (Zhipu AI) must be a selectable provider in the Add Model flow.
+
+    The dropdown is driven entirely by /public/providers/fields, so a missing
+    entry means zai cannot be added through the UI even though the backend
+    routes zai/* models. The credential fields must match what ZAIChatConfig
+    honors: a required api_key (no other auth path) and an optional api_base
+    defaulting to https://api.z.ai/api/paas/v4.
+    """
+    app_instance = FastAPI()
+    app_instance.include_router(router)
+    test_client = TestClient(app_instance)
+
+    response = test_client.get("/public/providers/fields")
+    assert response.status_code == 200
+    providers = response.json()
+
+    zai = next((p for p in providers if p["provider"] == "ZAI"), None)
+    assert zai is not None, "ZAI provider entry not found"
+
+    # provider must equal the UI provider_map key so the model dropdown resolves
+    # zai models; litellm_provider must be the backend slug.
+    assert zai["provider_display_name"] == "Z.AI (Zhipu AI)"
+    assert zai["litellm_provider"] == "zai"
+    assert zai["default_model_placeholder"].startswith("zai/")
+
+    fields_by_key = {f["key"]: f for f in zai["credential_fields"]}
+
+    # api_key is the only auth path, so it must be required and masked.
+    assert "api_key" in fields_by_key
+    assert fields_by_key["api_key"]["required"] is True
+    assert fields_by_key["api_key"]["field_type"] == "password"
+
+    # api_base is optional but pre-filled with the Z.AI public endpoint, matching
+    # the ZAI_API_BASE default baked into ZAIChatConfig.
+    assert fields_by_key["api_base"]["field_type"] == "text"
+    assert fields_by_key["api_base"]["required"] is False
+    assert fields_by_key["api_base"]["default_value"] == "https://api.z.ai/api/paas/v4"
+
+
 def test_vllm_provider_display_names_are_distinct():
     """Hosted and local vLLM must not share a dropdown label.
 

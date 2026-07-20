@@ -1,8 +1,10 @@
 # Minimal patch image based on upstream v1.92.0 release.
-# Applies 3 file patches for zai/glm-5.2 + thinking support:
+# Applies file patches for zai/glm-5.2 + thinking support + UI registration:
 #   1) zai provider transformation: wrap thinking/reasoning_effort into extra_body (PR #31085)
 #   2) backup model cost map: add zai/glm-5.2 entry (PR #31077 missed the backup file)
 #   3) force local backup usage (upstream raw fetch lacks zai/glm-5.2)
+#   4) mcp server: fix mcp log error
+#   5) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
 FROM ghcr.io/berriai/litellm-database:v1.92.0
 
 # Patch 1: zai provider transformation
@@ -11,10 +13,16 @@ COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-pack
 # Patch 2: backup model cost map (includes zai/glm-5.2)
 COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json
 
+# Patch 4: mcp server log fix
+COPY litellm/proxy/_experimental/mcp_server/server.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/_experimental/mcp_server/server.py
+
+# Patch 5: register ZAI provider in the Add Model UI dropdown + credential fields
+COPY litellm/proxy/public_endpoints/provider_create_fields.json /app/.venv/lib/python3.13/site-packages/litellm/proxy/public_endpoints/provider_create_fields.json
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.92.0 with cherry-picked PR #31085 + #31077 + backup file patch"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.92.0 with cherry-picked PR #31085 + #31077 + backup file + mcp log fix + ZAI UI registration"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/feat/zai-thinking-support"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.92.0"

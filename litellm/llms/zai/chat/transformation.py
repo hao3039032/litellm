@@ -63,6 +63,9 @@ class ZAIChatConfig(OpenAIGPTConfig):
             if param not in supported:
                 continue
             if param in _REASONING_PARAMS:
+                # Responses API may pass {"effort": "high"}; extract "effort" field
+                if isinstance(value, dict):
+                    value = value.get("effort", value)
                 optional_params.setdefault("extra_body", {})[param] = value
             else:
                 optional_params[param] = value

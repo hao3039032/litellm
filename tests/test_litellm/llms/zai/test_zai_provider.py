@@ -406,6 +406,45 @@ class TestZaiReasoningParamsLandInExtraBody:
         assert body["thinking"] == {"type": "disabled"}
 
 
+class TestGlm5vTurboContextWindow:
+    """GLM-5V-Turbo is a GLM-5-series model, not a GLM-4.5v one. Its
+    registry entry was seeded by copying the 4.5v values (128k input /
+    32k output), which made litellm's pre-call context-window check
+    reject a 148,212-token call with `ContextWindowExceededError` even
+    though the real model accepts 200k. Per docs.bigmodel.cn the GLM-5
+    family (glm-5, glm-5.1, glm-5-turbo, glm-5v-turbo) is uniformly
+    200k input / 128k output. These guards pin that so a future
+    copy-paste can't silently re-tighten the limit.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _use_local_model_cost(self, monkeypatch):
+        monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        litellm.model_cost = litellm.get_model_cost_map(url="")
+
+    def test_input_window_matches_glm5_family(self):
+        info = litellm.model_cost["zai/glm-5v-turbo"]
+        assert info["max_input_tokens"] == 200000
+        assert info["max_output_tokens"] == 128000
+
+    def test_accepts_the_failing_production_payload(self):
+        """The live call that surfaced this bug sent 148,212 input
+        tokens and was rejected. The registered ceiling must clear it
+        with headroom, not trip the pre-call guard.
+        """
+        info = litellm.model_cost["zai/glm-5v-turbo"]
+        assert info["max_input_tokens"] > 148212
+
+    def test_not_the_45v_family_limit(self):
+        """Direct guard against the copy-paste source. 128000/32000 are
+        the GLM-4.5v values the entry was seeded from; they must never
+        return for a GLM-5-series model.
+        """
+        info = litellm.model_cost["zai/glm-5v-turbo"]
+        assert info["max_input_tokens"] != 128000
+        assert info["max_output_tokens"] != 32000
+
+
 class TestGlm45FamilyRegistrySupportsReasoning:
     """docs.z.ai lists GLM-4.5 as the first model family that supports
     `thinking`. The registry had every GLM-4.5 entry marked

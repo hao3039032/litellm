@@ -1,11 +1,12 @@
 # Minimal patch image based on upstream v1.93.0 release.
-# Applies file patches for zai/glm-5.2 + thinking support + UI registration:
+# Applies file patches for zai/glm-5.2 + thinking support + UI registration + client UA forwarding:
 #   1) zai provider transformation: wrap thinking/reasoning_effort into extra_body (PR #31085)
 #   2) backup model cost map: add zai/glm-5.2 entry + GLM-4.5 family supports_reasoning
 #   3) root model cost map: add zai/glm-5.2 entry
 #   4) force local backup usage (upstream raw fetch lacks zai/glm-5.2)
 #   5) mcp server: fix mcp log error
 #   6) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
+#   7) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
 FROM ghcr.io/berriai/litellm-database:v1.93.0
 
 # Patch 1: zai provider transformation
@@ -23,10 +24,14 @@ COPY litellm/proxy/_experimental/mcp_server/server.py /app/.venv/lib/python3.13/
 # Patch 5: register ZAI provider in the Add Model UI dropdown + credential fields
 COPY litellm/proxy/public_endpoints/provider_create_fields.json /app/.venv/lib/python3.13/site-packages/litellm/proxy/public_endpoints/provider_create_fields.json
 
+# Patch 6: forward inbound client User-Agent upstream (LITELLM_FORWARD_CLIENT_USER_AGENT)
+COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py
+COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/litellm_pre_call_utils.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.93.0 with cherry-picked PR #31085 + #31077 + backup file + mcp log fix + ZAI UI registration"
-LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/feat/zai-thinking-support"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.93.0 with cherry-picked PR #31085 + #31077 + backup file + mcp log fix + ZAI UI registration + client UA forwarding"
+LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.93.0"

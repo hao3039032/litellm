@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import os
 import re
 import time
 from collections import OrderedDict
@@ -1687,6 +1688,8 @@ async def add_litellm_data_to_request(
         user_agent = request.headers["user-agent"]
     data[_metadata_variable_name]["user_agent"] = user_agent
 
+    _add_client_user_agent_to_request(data=data, request=request)
+
     if should_auto_drop_params_for_claude_code(user_agent, data, proxy_config):
         data["drop_params"] = True
 
@@ -2699,3 +2702,24 @@ def _add_otel_traceparent_to_data(data: dict, request: Request):
                 _exra_headers = data["extra_headers"]
                 if "traceparent" not in _exra_headers:
                     _exra_headers["traceparent"] = request.headers["traceparent"]
+
+
+def _add_client_user_agent_to_request(data: dict, request: Request) -> None:
+    """Forward the inbound client User-Agent upstream when the env flag is on.
+
+    No-op when ``LITELLM_USER_AGENT`` is set (explicit static override wins) or
+    when the client sent no User-Agent (the ``litellm/{version}`` client default
+    is then left untouched upstream rather than stripped).
+    """
+    if not litellm.forward_client_user_agent_to_llm_provider:
+        return
+    if os.getenv("LITELLM_USER_AGENT") is not None:
+        return
+    if request is None or not getattr(request, "headers", None):
+        return
+    client_ua = request.headers.get("user-agent")
+    if not client_ua:
+        return
+    _extra_headers = data.setdefault("extra_headers", {})
+    if "User-Agent" not in _extra_headers and "user-agent" not in _extra_headers:
+        _extra_headers["User-Agent"] = client_ua

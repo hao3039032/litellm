@@ -18,6 +18,7 @@ from litellm.proxy._types import AddTeamCallback, ProxyException, TeamCallbackMe
 from litellm.proxy.litellm_pre_call_utils import (
     KeyAndTeamLoggingSettings,
     LiteLLMProxyRequestSetup,
+    _add_client_user_agent_to_request,
     _apply_credential_overrides_from_model_config,
     _extract_credential_from_entry,
     _get_dynamic_logging_metadata,
@@ -7329,3 +7330,43 @@ def test_vertex_sends_exactly_one_authorization_header():
     vertex_request_headers.update(forwarded)
 
     assert _authorization_values(vertex_request_headers) == [GOOGLE_ACCESS_TOKEN]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_on, env_static_ua, client_ua_header, expected_ua",
+    [
+        (True, None, "my-test-client/1.0", "my-test-client/1.0"),
+        (True, "static-override/9.9", "my-test-client/1.0", None),
+        (True, None, None, None),
+        (False, None, "my-test-client/1.0", None),
+    ],
+)
+async def test_add_client_user_agent_to_request(flag_on, env_static_ua, client_ua_header, expected_ua, monkeypatch):
+    """The inbound client User-Agent reaches ``data["extra_headers"]`` only when
+    the forward flag is on and no static ``LITELLM_USER_AGENT`` override is set.
+    A missing client UA leaves the upstream default untouched (no UA injected),
+    and the flag off preserves the pre-feature behavior of never injecting.
+    """
+    headers = {"Content-Type": "application/json"}
+    if client_ua_header is not None:
+        headers["user-agent"] = client_ua_header
+    request = _make_request_mock("/v1/chat/completions", headers)
+
+    if env_static_ua is None:
+        monkeypatch.delenv("LITELLM_USER_AGENT", raising=False)
+    else:
+        monkeypatch.setenv("LITELLM_USER_AGENT", env_static_ua)
+    monkeypatch.setattr(
+        litellm,
+        "forward_client_user_agent_to_llm_provider",
+        flag_on,
+    )
+
+    data: dict = {}
+    _add_client_user_agent_to_request(data=data, request=request)
+
+    if expected_ua is None:
+        assert "extra_headers" not in data or "User-Agent" not in data.get("extra_headers", {})
+    else:
+        assert data["extra_headers"]["User-Agent"] == expected_ua

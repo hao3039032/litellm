@@ -1,30 +1,23 @@
-# Minimal patch image based on upstream v1.93.0 release.
-# Applies file patches for zai/glm-5.2 + thinking support + UI registration + client UA forwarding:
-#   1) zai provider transformation: wrap thinking/reasoning_effort into extra_body (PR #31085)
-#   2) backup model cost map: add zai/glm-5.2 entry + GLM-4.5 family supports_reasoning
-#   3) root model cost map: add zai/glm-5.2 entry
-#   4) force local backup usage (upstream raw fetch lacks zai/glm-5.2)
-#   5) mcp server: fix mcp log error
-#   6) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
-#   7) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
-FROM ghcr.io/berriai/litellm-database:v1.93.0
+# Minimal patch image based on upstream v1.99.1 release.
+# Applies file patches for zai/glm-5.2 + glm-5v-turbo + reasoning routing + UI registration + client UA forwarding.
+# Upstream 1.99.1 already ships a zai provider and most glm model entries; these patches only add what 1.99.1 lacks:
+#   1) zai transformation: route thinking/reasoning_effort into extra_body (upstream declares the params but does not inject them)
+#   2) backup model cost map: add zai/glm-5.2 + zai/glm-5v-turbo (upstream backup map lacks both)
+#   3) force local backup usage (1.99.1 fetches the root map remotely by default; that copy lacks zai/glm-5.2)
+#   4) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
+#   5) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
+FROM ghcr.io/berriai/litellm-database:v1.99.1
 
-# Patch 1: zai provider transformation
+# Patch 1: zai provider transformation (reasoning -> extra_body routing)
 COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
 
-# Patch 2: backup model cost map (includes zai/glm-5.2 + zai/glm-5v-turbo + GLM-4.5 family supports_reasoning)
+# Patch 2: backup model cost map (includes zai/glm-5.2 + zai/glm-5v-turbo)
 COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json
 
-# Patch 3: root model cost map (includes zai/glm-5.2)
-COPY model_prices_and_context_window.json /app/.venv/lib/python3.13/site-packages/model_prices_and_context_window.json
-
-# Patch 4: mcp server log fix
-COPY litellm/proxy/_experimental/mcp_server/server.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/_experimental/mcp_server/server.py
-
-# Patch 5: register ZAI provider in the Add Model UI dropdown + credential fields
+# Patch 3: register ZAI provider in the Add Model UI dropdown + credential fields
 COPY litellm/proxy/public_endpoints/provider_create_fields.json /app/.venv/lib/python3.13/site-packages/litellm/proxy/public_endpoints/provider_create_fields.json
 
-# Patch 6: forward inbound client User-Agent upstream (LITELLM_FORWARD_CLIENT_USER_AGENT)
+# Patch 4: forward inbound client User-Agent upstream (LITELLM_FORWARD_CLIENT_USER_AGENT)
 COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py
 COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/litellm_pre_call_utils.py
 
@@ -32,6 +25,6 @@ COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-pack
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.93.0 with cherry-picked PR #31085 + #31077 + backup file + mcp log fix + ZAI UI registration + client UA forwarding"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
-LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.93.0"
+LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.99.1"

@@ -466,6 +466,43 @@ async def test_add_litellm_data_to_request_proxy_server_request_body_is_post_str
 
 
 @pytest.mark.asyncio
+async def test_add_litellm_data_to_request_strips_client_proxy():
+    from litellm.proxy.litellm_pre_call_utils import add_litellm_data_to_request
+
+    request_mock = MagicMock(spec=Request)
+    request_mock.url.path = "/v1/chat/completions"
+    request_mock.url = MagicMock()
+    request_mock.url.__str__.return_value = "http://localhost/v1/chat/completions"
+    request_mock.method = "POST"
+    request_mock.query_params = {}
+    request_mock.headers = {"Content-Type": "application/json"}
+    request_mock.client = MagicMock()
+    request_mock.client.host = "127.0.0.1"
+    user_api_key_dict = UserAPIKeyAuth(
+        api_key="hashed-key",
+        metadata={},
+        team_metadata={},
+        spend=0.0,
+        max_budget=100.0,
+        model_max_budget={},
+        team_spend=0.0,
+        team_max_budget=200.0,
+    )
+
+    updated = await add_litellm_data_to_request(
+        data={"model": "gpt-5", "proxy": "socks5h://attacker:secret@127.0.0.1:1080"},
+        request=request_mock,
+        user_api_key_dict=user_api_key_dict,
+        proxy_config=MagicMock(),
+        general_settings={},
+        version="test-version",
+    )
+
+    assert "proxy" not in updated
+    assert "proxy" not in updated["proxy_server_request"]["body"]
+
+
+@pytest.mark.asyncio
 async def test_add_litellm_data_to_request_body_snapshot_excludes_secret_fields():
     """Security: proxy_server_request['body'] must never contain secret_fields
     because that dict holds raw HTTP headers including Authorization Bearer

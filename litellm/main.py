@@ -5361,6 +5361,8 @@ def completion(  # type: ignore
             litellm_params=litellm_params,
             custom_llm_provider=custom_llm_provider,
         )
+        if custom_llm_provider == "openai" and isinstance(kwargs.get("proxy"), str):
+            litellm_params = {**litellm_params, "proxy": kwargs["proxy"]}
         if mock_response or mock_tool_calls or mock_timeout:
             kwargs.pop("mock_timeout", None)  # remove for any fallbacks triggered
             return mock_completion(

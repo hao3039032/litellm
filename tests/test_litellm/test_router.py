@@ -16,6 +16,83 @@ import litellm
 from litellm.exceptions import MidStreamFallbackError
 
 
+def test_router_resolves_model_proxy_environment_variable(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL_PROXY", "socks5h://127.0.0.1:1080")
+    router = litellm.Router(
+        model_list=[
+            {
+                "model_name": "gpt-5-proxied",
+                "litellm_params": {
+                    "model": "openai/gpt-5",
+                    "proxy": "os.environ/OPENAI_MODEL_PROXY",
+                },
+            }
+        ]
+    )
+
+    assert router.model_list[0]["litellm_params"]["proxy"] == "socks5h://127.0.0.1:1080"
+
+
+def test_router_rejects_missing_model_proxy_environment_variable(monkeypatch):
+    monkeypatch.delenv("MISSING_OPENAI_MODEL_PROXY", raising=False)
+
+    with pytest.raises(ValueError, match="Model proxy environment variable is not set"):
+        litellm.Router(
+            model_list=[
+                {
+                    "model_name": "gpt-5-proxied",
+                    "litellm_params": {
+                        "model": "openai/gpt-5",
+                        "proxy": "os.environ/MISSING_OPENAI_MODEL_PROXY",
+                    },
+                }
+            ]
+        )
+
+
+def test_router_rejects_unsupported_model_proxy_scheme():
+    with pytest.raises(ValueError, match="must use http, https, socks5, or socks5h"):
+        litellm.Router(
+            model_list=[
+                {
+                    "model_name": "gpt-5-proxied",
+                    "litellm_params": {
+                        "model": "openai/gpt-5",
+                        "proxy": "ftp://proxy.example.com",
+                    },
+                }
+            ]
+        )
+
+
+def test_router_rejects_model_proxy_query_credentials():
+    with pytest.raises(ValueError, match="cannot include a query or fragment"):
+        litellm.Router(
+            model_list=[
+                {
+                    "model_name": "gpt-5-proxied",
+                    "litellm_params": {
+                        "model": "openai/gpt-5",
+                        "proxy": "http://proxy.example.com:8080?token=secret",
+                    },
+                }
+            ]
+        )
+
+
+def test_model_proxy_validation_error_hides_credentials():
+    from litellm.types.router import LiteLLM_Params
+
+    with pytest.raises(ValueError) as exc_info:
+        LiteLLM_Params(
+            model="openai/gpt-5",
+            proxy="ftp://proxy-user:proxy-password@proxy.example.com",
+        )
+
+    assert "proxy-user" not in str(exc_info.value)
+    assert "proxy-password" not in str(exc_info.value)
+
+
 def test_update_kwargs_does_not_mutate_defaults_and_merges_metadata():
     # initialize a real Router (env‑vars can be empty)
     router = litellm.Router(

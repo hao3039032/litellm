@@ -358,6 +358,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         organization: Optional[str] = None,
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ) -> Optional[Union[OpenAI, AsyncOpenAI]]:
         client_initialization_params: Dict = locals()
         if client is None:
@@ -378,7 +379,10 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 _new_client: Union[OpenAI, AsyncOpenAI] = AsyncOpenAI(
                     api_key=api_key,
                     base_url=api_base,
-                    http_client=OpenAIChatCompletion._get_async_http_client(shared_session=shared_session),
+                    http_client=OpenAIChatCompletion._get_async_http_client(
+                        shared_session=shared_session,
+                        proxy=proxy,
+                    ),
                     timeout=timeout,
                     max_retries=max_retries,
                     organization=organization,
@@ -387,7 +391,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 _new_client = OpenAI(
                     api_key=api_key,
                     base_url=api_base,
-                    http_client=OpenAIChatCompletion._get_sync_http_client(),
+                    http_client=OpenAIChatCompletion._get_sync_http_client(proxy=proxy),
                     timeout=timeout,
                     max_retries=max_retries,
                     organization=organization,
@@ -615,6 +619,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             inference_params = optional_params.copy()
             stream_options: Optional[dict] = inference_params.pop("stream_options", None)
             stream: Optional[bool] = inference_params.pop("stream", False)
+            proxy: Optional[str] = litellm_params.get("proxy")
             provider_config: Optional[BaseConfig] = None
 
             if custom_llm_provider is not None and model is not None:
@@ -671,6 +676,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                                 drop_params=drop_params,
                                 stream_options=stream_options,
                                 shared_session=shared_session,
+                                proxy=proxy,
                             )
                         else:
                             return self.acompletion(
@@ -692,6 +698,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                                 drop_params=drop_params,
                                 fake_stream=fake_stream,
                                 shared_session=shared_session,
+                                proxy=proxy,
                             )
 
                     data = provider_config.transform_request(
@@ -715,6 +722,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                             max_retries=max_retries,
                             organization=organization,
                             stream_options=stream_options,
+                            proxy=proxy,
                         )
                     else:
                         if not isinstance(max_retries, int):
@@ -728,6 +736,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                             max_retries=max_retries,
                             organization=organization,
                             client=client,
+                            proxy=proxy,
                         )
 
                         ## LOGGING
@@ -848,6 +857,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         stream_options: Optional[dict] = None,
         fake_stream: bool = False,
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ):
         response = None
         data = await provider_config.async_transform_request(
@@ -869,6 +879,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     organization=organization,
                     client=client,
                     shared_session=shared_session,
+                    proxy=proxy,
                 )
 
                 ## LOGGING
@@ -964,6 +975,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         max_retries=None,
         headers=None,
         stream_options: Optional[dict] = None,
+        proxy: Optional[str] = None,
     ):
         data["stream"] = True
         data.update(self.get_stream_options(stream_options=stream_options, api_base=api_base))
@@ -977,6 +989,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             max_retries=max_retries,
             organization=organization,
             client=client,
+            proxy=proxy,
         )
         ## LOGGING
         logging_obj.pre_call(
@@ -1026,6 +1039,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         drop_params: Optional[bool] = None,
         stream_options: Optional[dict] = None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ):
         response = None
         data = provider_config.transform_request(
@@ -1049,6 +1063,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     organization=organization,
                     client=client,
                     shared_session=shared_session,
+                    proxy=proxy,
                 )
                 ## LOGGING
                 logging_obj.pre_call(

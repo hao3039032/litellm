@@ -1459,6 +1459,7 @@ async def add_litellm_data_to_request(
         cache_dict = parse_cache_control(cache_control_header)
         data["ttl"] = cache_dict.get("s-maxage")
 
+    data.pop("proxy", None)
     verbose_proxy_logger.debug("receiving data: %s", data)
 
     # Parse metadata if it's a string (e.g., from multipart/form-data)

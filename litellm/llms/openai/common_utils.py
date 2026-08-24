@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from aiohttp import ClientSession
 
 import litellm
+from litellm.litellm_core_utils.proxy_utils import model_proxy_fingerprint
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.custom_httpx.http_handler import (
     _DEFAULT_TTL_FOR_HTTPX_CLIENTS,
@@ -168,6 +169,7 @@ class BaseOpenAILLM:
         key_parts = [
             f"hashed_api_key={hashed_api_key}",
             f"is_async={client_initialization_params.get('is_async')}",
+            f"proxy_fingerprint={model_proxy_fingerprint(client_initialization_params.get('proxy'))}",
         ]
 
         LITELLM_CLIENT_SPECIFIC_PARAMS = (
@@ -200,8 +202,9 @@ class BaseOpenAILLM:
     @staticmethod
     def _get_async_http_client(
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ) -> Optional[httpx.AsyncClient]:
-        if litellm.aclient_session is not None:
+        if proxy is None and litellm.aclient_session is not None:
             return litellm.aclient_session
 
         if getattr(litellm, "network_mock", False):
@@ -211,6 +214,9 @@ class BaseOpenAILLM:
 
         # Get unified SSL configuration
         ssl_config = get_ssl_configuration()
+
+        if proxy is not None:
+            return httpx.AsyncClient(proxy=proxy, verify=ssl_config, follow_redirects=True)
 
         return httpx.AsyncClient(
             verify=ssl_config,
@@ -223,8 +229,8 @@ class BaseOpenAILLM:
         )
 
     @staticmethod
-    def _get_sync_http_client() -> Optional[httpx.Client]:
-        if litellm.client_session is not None:
+    def _get_sync_http_client(proxy: Optional[str] = None) -> Optional[httpx.Client]:
+        if proxy is None and litellm.client_session is not None:
             return litellm.client_session
 
         if getattr(litellm, "network_mock", False):
@@ -236,6 +242,7 @@ class BaseOpenAILLM:
         ssl_config = get_ssl_configuration()
 
         return httpx.Client(
+            proxy=proxy,
             verify=ssl_config,
             follow_redirects=True,
         )

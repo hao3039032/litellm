@@ -6,6 +6,7 @@ from typing import Optional, Set
 
 from fastapi import Request
 
+from litellm.litellm_core_utils.proxy_utils import mask_model_proxy
 from litellm.litellm_core_utils.sensitive_data_masker import SensitiveDataMasker
 from litellm.proxy.common_utils.http_parsing_utils import _read_request_body
 
@@ -32,6 +33,9 @@ def remove_sensitive_info_from_deployment(
     deployment_dict["litellm_params"].pop("vertex_ai_credentials", None)
     deployment_dict["litellm_params"].pop("aws_access_key_id", None)
     deployment_dict["litellm_params"].pop("aws_secret_access_key", None)
+    proxy = deployment_dict["litellm_params"].get("proxy")
+    if isinstance(proxy, str):
+        deployment_dict["litellm_params"]["proxy"] = mask_model_proxy(proxy)
 
     # Rate-limit config fields must never be masked — they are integers, not credentials.
     # The field names contain "key" which matches the masker's sensitive pattern, so we

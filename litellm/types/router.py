@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing_extensions import Protocol, Required, TypedDict, runtime_checkable
 
 from litellm._uuid import uuid
+from litellm.litellm_core_utils.proxy_utils import validate_model_proxy
 
 from .completion import CompletionRequest
 from .embedding import EmbeddingRequest
@@ -218,6 +219,11 @@ class CredentialLiteLLMParams(BaseModel):
 _RESERVED_INIT_KEYS = frozenset({"self", "params", "__class__"})
 
 
+class _MaskedModelProxy(str):
+    def __repr__(self) -> str:
+        return "'***'"
+
+
 class GenericLiteLLMParams(CredentialLiteLLMParams, CustomPricingLiteLLMParams):
     """
     LiteLLM Params without 'model' arg (used across completion / assistants api)
@@ -234,6 +240,7 @@ class GenericLiteLLMParams(CredentialLiteLLMParams, CustomPricingLiteLLMParams):
     )
     max_retries: Optional[int] = None
     organization: Optional[str] = None  # for openai orgs
+    proxy: Optional[str] = None
     configurable_clientside_auth_params: CONFIGURABLE_CLIENTSIDE_AUTH_PARAMS = None
     litellm_credential_name: Optional[str] = None
 
@@ -308,8 +315,17 @@ class GenericLiteLLMParams(CredentialLiteLLMParams, CustomPricingLiteLLMParams):
             filtered = {k: v for k, v in data.items() if k not in _RESERVED_INIT_KEYS}
             if "max_retries" in filtered and isinstance(filtered["max_retries"], str):
                 filtered["max_retries"] = int(filtered["max_retries"])
+            if "proxy" in filtered and isinstance(filtered["proxy"], str):
+                filtered["proxy"] = _MaskedModelProxy(filtered["proxy"])
             return filtered
         return data
+
+    @field_validator("proxy")
+    @classmethod
+    def validate_proxy(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_model_proxy(value)
 
     def __contains__(self, key):
         # Define custom behavior for the 'in' operator
@@ -385,6 +401,7 @@ class LiteLLMParamsTypedDict(TypedDict, total=False):
     stream_timeout: Optional[Union[float, str]]
     max_retries: Optional[int]
     organization: Optional[Union[List, str]]  # for openai orgs
+    proxy: Optional[str]
     configurable_clientside_auth_params: (
         CONFIGURABLE_CLIENTSIDE_AUTH_PARAMS  # for allowing api base switching on finetuned models
     )

@@ -123,6 +123,80 @@ def test_response_api_handler_streams_when_provider_transform_adds_stream():
     assert client.post.call_args.kwargs["json"]["stream"] is True
 
 
+def test_openai_responses_handler_uses_model_proxy():
+    handler = BaseLLMHTTPHandler()
+    config = Mock()
+    config.validate_environment.return_value = {}
+    config.get_complete_url.return_value = "https://api.openai.com/v1/responses"
+    config.transform_responses_api_request.return_value = {"model": "gpt-5", "input": "hi"}
+    config.sign_request.return_value = ({}, None)
+    config.transform_response_api_response.return_value = Mock()
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+    client = Mock(spec=HTTPHandler)
+    client.post.return_value = httpx.Response(
+        200,
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+    )
+
+    with patch(
+        "litellm.llms.custom_httpx.llm_http_handler._get_httpx_client",
+        return_value=client,
+    ) as get_httpx_client:
+        handler.response_api_handler(
+            model="gpt-5",
+            input="hi",
+            responses_api_provider_config=config,
+            response_api_optional_request_params={},
+            custom_llm_provider="openai",
+            litellm_params=GenericLiteLLMParams(proxy=proxy),
+            logging_obj=Mock(),
+        )
+
+    get_httpx_client.assert_called_once_with(
+        params={"ssl_verify": None, "proxy": proxy}
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_openai_responses_handler_uses_model_proxy():
+    handler = BaseLLMHTTPHandler()
+    config = Mock()
+    config.validate_environment.return_value = {}
+    config.get_complete_url.return_value = "https://api.openai.com/v1/responses"
+    config.transform_responses_api_request.return_value = {"model": "gpt-5", "input": "hi"}
+    config.sign_request.return_value = ({}, None)
+    config.transform_response_api_response.return_value = Mock()
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+    client = Mock(spec=AsyncHTTPHandler)
+    client.post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+    )
+    logging_obj = Mock()
+    logging_obj.dynamic_success_callbacks = []
+
+    with patch(
+        "litellm.llms.custom_httpx.llm_http_handler.get_async_httpx_client",
+        return_value=client,
+    ) as get_httpx_client:
+        await handler.async_response_api_handler(
+            model="gpt-5",
+            input="hi",
+            responses_api_provider_config=config,
+            response_api_optional_request_params={},
+            custom_llm_provider="openai",
+            litellm_params=GenericLiteLLMParams(proxy=proxy),
+            logging_obj=logging_obj,
+        )
+
+    assert get_httpx_client.call_args.kwargs["params"] == {
+        "ssl_verify": None,
+        "proxy": proxy,
+    }
+
+
 def test_response_api_handler_runs_agentic_hooks_in_sync_path(monkeypatch):
     handler = BaseLLMHTTPHandler()
     config = Mock()

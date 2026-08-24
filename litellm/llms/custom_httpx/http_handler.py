@@ -42,6 +42,7 @@ from litellm.constants import (
     HTTP_HANDLER_CONNECT_TIMEOUT_SECONDS,
 )
 from litellm.litellm_core_utils.logging_utils import track_llm_api_timing
+from litellm.litellm_core_utils.proxy_utils import model_proxy_fingerprint
 from litellm.litellm_core_utils.request_timeout_resolver import (
     get_configured_request_timeout,
 )
@@ -515,14 +516,19 @@ class AsyncHTTPHandler:
         client_alias: Optional[str] = None,  # name for client in logs
         ssl_verify: Optional[VerifyTypes] = None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ):
         self.timeout = timeout
         self.event_hooks = event_hooks
+        self.ssl_verify = ssl_verify
+        self.shared_session = shared_session
+        self.proxy = proxy
         self.client = self.create_client(
             timeout=timeout,
             event_hooks=event_hooks,
             ssl_verify=ssl_verify,
             shared_session=shared_session,
+            proxy=proxy,
         )
         self.client_alias = client_alias
 
@@ -532,6 +538,7 @@ class AsyncHTTPHandler:
         event_hooks: Optional[Mapping[str, List[Callable[..., Any]]]],
         ssl_verify: Optional[VerifyTypes] = None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: Optional[str] = None,
     ) -> httpx.AsyncClient:
         # Get unified SSL configuration
         ssl_config = get_ssl_configuration(ssl_verify)
@@ -544,14 +551,24 @@ class AsyncHTTPHandler:
             timeout = _DEFAULT_TIMEOUT
         # Create a client with a connection pool
 
+        default_headers = get_default_headers()
+
+        if proxy is not None:
+            return httpx.AsyncClient(
+                proxy=proxy,
+                event_hooks=event_hooks,
+                timeout=timeout,
+                verify=ssl_config,
+                cert=cert,
+                headers=default_headers,
+                follow_redirects=True,
+            )
+
         transport = AsyncHTTPHandler._create_async_transport(
             ssl_context=ssl_config if isinstance(ssl_config, ssl.SSLContext) else None,
             ssl_verify=ssl_config if isinstance(ssl_config, bool) else None,
             shared_session=shared_session,
         )
-
-        # Get default headers (User-Agent, overridable via LITELLM_USER_AGENT)
-        default_headers = get_default_headers()
 
         return httpx.AsyncClient(
             transport=transport,
@@ -635,7 +652,13 @@ class AsyncHTTPHandler:
             return response
         except (httpx.RemoteProtocolError, httpx.ConnectError):
             # Retry the request with a new session if there is a connection error
-            new_client = self.create_client(timeout=timeout, event_hooks=self.event_hooks)
+            new_client = self.create_client(
+                timeout=timeout,
+                event_hooks=self.event_hooks,
+                ssl_verify=self.ssl_verify,
+                shared_session=self.shared_session,
+                proxy=self.proxy,
+            )
             try:
                 return await self.single_connection_post_request(
                     url=url,
@@ -1073,6 +1096,7 @@ class HTTPHandler:
         disable_default_headers: Optional[
             bool
         ] = False,  # arize phoenix returns different API responses when user agent header in request
+        proxy: Optional[str] = None,
     ):
         if timeout is None:
             timeout = _DEFAULT_TIMEOUT
@@ -1088,11 +1112,12 @@ class HTTPHandler:
         default_headers = get_default_headers() if not disable_default_headers else None
 
         if client is None:
-            transport = self._create_sync_transport()
+            transport = None if proxy is not None else self._create_sync_transport()
 
             # Create a client with a connection pool
             self.client = httpx.Client(
                 transport=transport,
+                proxy=proxy,
                 timeout=timeout,
                 verify=ssl_config,
                 cert=cert,
@@ -1379,7 +1404,8 @@ def get_async_httpx_client(
     if params is not None:
         for key, value in params.items():
             try:
-                _params_key_name += f"{key}_{value}"
+                cache_value = model_proxy_fingerprint(value) if key == "proxy" else value
+                _params_key_name += f"{key}_{cache_value}"
             except Exception:
                 pass
 
@@ -1428,7 +1454,8 @@ def _get_httpx_client(params: Optional[dict] = None) -> HTTPHandler:
     if params is not None:
         for key, value in params.items():
             try:
-                _params_key_name += f"{key}_{value}"
+                cache_value = model_proxy_fingerprint(value) if key == "proxy" else value
+                _params_key_name += f"{key}_{cache_value}"
             except Exception:
                 pass
 

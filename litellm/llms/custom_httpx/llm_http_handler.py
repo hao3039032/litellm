@@ -2492,7 +2492,10 @@ class BaseLLMHTTPHandler:
         )
 
         if client is None or not isinstance(client, HTTPHandler):
-            sync_httpx_client = _get_httpx_client(params={"ssl_verify": litellm_params.get("ssl_verify", None)})
+            handler_params: Dict[str, Any] = {"ssl_verify": litellm_params.get("ssl_verify", None)}
+            if custom_llm_provider == "openai" and litellm_params.proxy is not None:
+                handler_params["proxy"] = litellm_params.proxy
+            sync_httpx_client = _get_httpx_client(params=handler_params)
         else:
             sync_httpx_client = client
 
@@ -2536,7 +2539,9 @@ class BaseLLMHTTPHandler:
             pass
         # Needed by streaming callbacks/metadata helpers to reconstruct api_base/model_id
         # but never included in the outbound provider payload.
-        request_context["litellm_params"] = dict(litellm_params)
+        request_context_litellm_params = dict(litellm_params)
+        request_context_litellm_params.pop("proxy", None)
+        request_context["litellm_params"] = request_context_litellm_params
 
         is_stream_request = bool(stream)
         if is_stream_request and fake_stream is True:
@@ -2665,9 +2670,12 @@ class BaseLLMHTTPHandler:
             verbose_logger.debug(
                 f"Creating HTTP client for responses API with shared_session: {id(shared_session) if shared_session else None}"
             )
+            handler_params: Dict[str, Any] = {"ssl_verify": litellm_params.get("ssl_verify", None)}
+            if custom_llm_provider == "openai" and litellm_params.proxy is not None:
+                handler_params["proxy"] = litellm_params.proxy
             async_httpx_client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders(custom_llm_provider),
-                params={"ssl_verify": litellm_params.get("ssl_verify", None)},
+                params=handler_params,
                 shared_session=shared_session,
             )
         else:
@@ -2713,7 +2721,9 @@ class BaseLLMHTTPHandler:
             pass
         # Needed by streaming callbacks/metadata helpers to reconstruct api_base/model_id
         # but never included in the outbound provider payload.
-        request_context["litellm_params"] = dict(litellm_params)
+        request_context_litellm_params = dict(litellm_params)
+        request_context_litellm_params.pop("proxy", None)
+        request_context["litellm_params"] = request_context_litellm_params
 
         is_stream_request = bool(stream)
         if is_stream_request and fake_stream is True:

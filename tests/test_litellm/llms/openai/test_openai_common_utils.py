@@ -10,6 +10,7 @@ sys.path.insert(
 
 import litellm
 from litellm.llms.openai.common_utils import BaseOpenAILLM
+from litellm.llms.openai.openai import OpenAIChatCompletion
 
 # Test parameters for different API functions
 API_FUNCTION_PARAMS = [
@@ -175,3 +176,70 @@ def test_get_openai_client_cache_key(client_type):
     )
     assert isinstance(key, str)
     assert "api_key=sk-test" in key
+
+
+def test_openai_client_cache_key_hashes_proxy_credentials():
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+    key = BaseOpenAILLM.get_openai_client_cache_key(
+        client_initialization_params={"api_key": "sk-test", "proxy": proxy},
+        client_type="openai",
+    )
+
+    assert proxy not in key
+    assert "proxy-user" not in key
+    assert "proxy-password" not in key
+    assert "proxy_fingerprint=" in key
+
+
+def test_openai_client_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "get_cached_openai_client", return_value=None),
+        patch.object(openai_handler, "set_cached_openai_client"),
+        patch.object(OpenAIChatCompletion, "_get_sync_http_client") as get_http_client,
+        patch("litellm.llms.openai.openai.OpenAI") as openai_client,
+    ):
+        openai_handler._get_openai_client(
+            is_async=False,
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    get_http_client.assert_called_once_with(proxy=proxy)
+    assert openai_client.call_args.kwargs["http_client"] is get_http_client.return_value
+
+
+def test_explicit_openai_client_takes_precedence_over_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    provided_client = MagicMock()
+    openai_handler = OpenAIChatCompletion()
+
+    with patch.object(OpenAIChatCompletion, "_get_sync_http_client") as get_http_client:
+        result = openai_handler._get_openai_client(
+            is_async=False,
+            client=provided_client,
+            proxy=proxy,
+        )
+
+    assert result is provided_client
+    get_http_client.assert_not_called()
+
+
+def test_completion_passes_proxy_only_in_provider_litellm_params():
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+    response = litellm.ModelResponse()
+
+    with patch.object(OpenAIChatCompletion, "completion", return_value=response) as completion:
+        result = litellm.completion(
+            model="openai/gpt-4o-mini",
+            messages=[{"role": "user", "content": "hello"}],
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert result is response
+    assert completion.call_args.kwargs["litellm_params"]["proxy"] == proxy
+    logging_obj = completion.call_args.kwargs["logging_obj"]
+    assert "proxy" not in logging_obj.model_call_details["litellm_params"]

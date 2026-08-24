@@ -125,6 +125,36 @@ def test_sync_post_streaming_status_error_should_not_wait_forever_for_body(
         litellm_handler.close()
 
 
+def test_sync_http_handler_configures_model_proxy():
+    proxy = "http://proxy-user:proxy-password@127.0.0.1:8080"
+    with patch("litellm.llms.custom_httpx.http_handler.httpx.Client") as client:
+        HTTPHandler(proxy=proxy)
+
+    assert client.call_args.kwargs["proxy"] == proxy
+    assert client.call_args.kwargs["transport"] is None
+
+
+def test_async_http_handler_configures_model_proxy():
+    proxy = "http://proxy-user:proxy-password@127.0.0.1:8080"
+    with patch("litellm.llms.custom_httpx.http_handler.httpx.AsyncClient") as client:
+        AsyncHTTPHandler(proxy=proxy)
+
+    assert client.call_args.kwargs["proxy"] == proxy
+
+
+def test_sync_http_handler_builds_socks5h_transport():
+    handler = HTTPHandler(proxy="socks5h://127.0.0.1:1080")
+    try:
+        proxy_pools = [
+            transport._pool
+            for transport in handler.client._mounts.values()
+            if transport is not None
+        ]
+        assert any(type(pool).__name__ == "SOCKSProxy" for pool in proxy_pools)
+    finally:
+        handler.close()
+
+
 @pytest.mark.asyncio
 async def test_ssl_security_level(monkeypatch):
     # Ensure aiohttp transport is enabled for this test

@@ -121,3 +121,17 @@ def test_remove_sensitive_info_from_deployment_with_excluded_keys():
 
     # api_key should still be removed (popped) regardless of excluded_keys
     assert "api_key" not in sanitized_config["litellm_params"]
+
+
+def test_remove_sensitive_info_masks_model_proxy_credentials():
+    model_config = {
+        "model_name": "gpt-5",
+        "litellm_params": {
+            "model": "openai/gpt-5",
+            "proxy": "socks5h://proxy-user:proxy-password@proxy.example.com:1080",
+        },
+    }
+
+    sanitized_config = remove_sensitive_info_from_deployment(model_config)
+
+    assert sanitized_config["litellm_params"]["proxy"] == "socks5h://***:***@proxy.example.com:1080"

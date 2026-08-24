@@ -248,6 +248,7 @@ from litellm.litellm_core_utils.core_helpers import (
 )
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+from litellm.litellm_core_utils.proxy_utils import resolve_model_proxy
 from litellm.litellm_core_utils.sensitive_data_masker import (
     SensitiveDataMasker,
     mask_sensitive_keys,
@@ -4853,7 +4854,9 @@ class ProxyConfig:
             for model in model_list:
                 ### LOAD FROM os.environ/ ###
                 for k, v in model["litellm_params"].items():
-                    if isinstance(v, str) and v.startswith("os.environ/"):
+                    if k == "proxy" and isinstance(v, str):
+                        model["litellm_params"][k] = resolve_model_proxy(v)
+                    elif isinstance(v, str) and v.startswith("os.environ/"):
                         model["litellm_params"][k] = get_secret(v)
                 complexity_router_config = model["litellm_params"].get("complexity_router_config")
                 if isinstance(complexity_router_config, dict):
@@ -5273,6 +5276,8 @@ class ProxyConfig:
             return value
 
         decrypted_value = decrypt_value_helper(value=value, key=key, return_original_value=True)
+        if key == "proxy" and isinstance(decrypted_value, str):
+            return resolve_model_proxy(decrypted_value)
         if isinstance(decrypted_value, str) and decrypted_value.startswith("os.environ/"):
             return get_secret(decrypted_value)
         return decrypted_value

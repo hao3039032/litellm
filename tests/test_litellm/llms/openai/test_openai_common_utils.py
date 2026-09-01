@@ -4,13 +4,12 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-sys.path.insert(
-    0, os.path.abspath("../../..")
-)  # Adds the parent directory to the system path
+sys.path.insert(0, os.path.abspath("../../.."))  # Adds the parent directory to the system path
 
 import litellm
 from litellm.llms.openai.common_utils import BaseOpenAILLM
-from litellm.llms.openai.openai import OpenAIChatCompletion
+from litellm.llms.openai.openai import OpenAIChatCompletion, OpenAIError
+from litellm.types.utils import EmbeddingResponse
 
 # Test parameters for different API functions
 API_FUNCTION_PARAMS = [
@@ -87,11 +86,7 @@ async def test_openai_client_reuse(function_name, is_async, args):
     litellm.set_verbose = True
 
     # Determine which client class to mock based on whether the test is async
-    client_path = (
-        "litellm.llms.openai.openai.AsyncOpenAI"
-        if is_async
-        else "litellm.llms.openai.openai.OpenAI"
-    )
+    client_path = "litellm.llms.openai.openai.AsyncOpenAI" if is_async else "litellm.llms.openai.openai.OpenAI"
 
     # Create the appropriate patches
     with (
@@ -101,9 +96,7 @@ async def test_openai_client_reuse(function_name, is_async, args):
     ):
         # Setup the mock to return None first time (cache miss) then a client for subsequent calls
         mock_client = MagicMock()
-        mock_get_cache.side_effect = [None] + [
-            mock_client
-        ] * 9  # First call returns None, rest return the mock client
+        mock_get_cache.side_effect = [None] + [mock_client] * 9  # First call returns None, rest return the mock client
 
         # Make 10 API calls
         for _ in range(10):
@@ -121,9 +114,9 @@ async def test_openai_client_reuse(function_name, is_async, args):
                 pass
 
         # Verify client was created only once
-        assert (
-            mock_client_class.call_count == 1
-        ), f"{'Async' if is_async else ''}OpenAI client should be created only once"
+        assert mock_client_class.call_count == 1, (
+            f"{'Async' if is_async else ''}OpenAI client should be created only once"
+        )
 
         # Verify the client was cached
         assert mock_set_cache.call_count == 1, "Client should be cached once"
@@ -147,12 +140,8 @@ def test_precomputed_init_params_match_inspect_signature():
         _OPENAI_INIT_PARAMS,
     )
 
-    expected_openai = tuple(
-        p for p in inspect.signature(OpenAI.__init__).parameters if p != "self"
-    )
-    expected_azure = tuple(
-        p for p in inspect.signature(AzureOpenAI.__init__).parameters if p != "self"
-    )
+    expected_openai = tuple(p for p in inspect.signature(OpenAI.__init__).parameters if p != "self")
+    expected_azure = tuple(p for p in inspect.signature(AzureOpenAI.__init__).parameters if p != "self")
 
     assert _OPENAI_INIT_PARAMS == expected_openai
     assert _AZURE_OPENAI_INIT_PARAMS == expected_azure
@@ -243,3 +232,183 @@ def test_completion_passes_proxy_only_in_provider_litellm_params():
     assert completion.call_args.kwargs["litellm_params"]["proxy"] == proxy
     logging_obj = completion.call_args.kwargs["logging_obj"]
     assert "proxy" not in logging_obj.model_call_details["litellm_params"]
+
+
+def test_embedding_passes_proxy_to_openai_handler():
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+    response = EmbeddingResponse()
+
+    with patch.object(OpenAIChatCompletion, "embedding", return_value=response) as embedding:
+        result = litellm.embedding(
+            model="openai/text-embedding-3-small",
+            input=["hello"],
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert result is response
+    assert embedding.call_args.kwargs["proxy"] == proxy
+    logging_obj = embedding.call_args.kwargs["logging_obj"]
+    assert "proxy" not in logging_obj.model_call_details["litellm_params"]
+
+
+def test_openai_embedding_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(OpenAIError),
+    ):
+        openai_handler.embedding(
+            model="text-embedding-3-small",
+            input=["hello"],
+            timeout=30,
+            logging_obj=MagicMock(),
+            model_response=EmbeddingResponse(),
+            optional_params={},
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_async_openai_embedding_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(OpenAIError),
+    ):
+        await openai_handler.aembedding(
+            input=["hello"],
+            data={"model": "text-embedding-3-small", "input": ["hello"]},
+            model_response=EmbeddingResponse(),
+            timeout=30,
+            logging_obj=MagicMock(),
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+def test_speech_passes_proxy_to_openai_handler():
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    with patch.object(OpenAIChatCompletion, "audio_speech", return_value=MagicMock()) as audio_speech:
+        litellm.speech(
+            model="openai/tts-1",
+            input="hello",
+            voice="alloy",
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert audio_speech.call_args.kwargs["proxy"] == proxy
+
+
+def test_openai_audio_speech_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError),
+    ):
+        openai_handler.audio_speech(
+            model="tts-1",
+            input="hello",
+            voice="alloy",
+            optional_params={},
+            api_key="sk-test",
+            api_base=None,
+            organization=None,
+            project=None,
+            max_retries=0,
+            timeout=30,
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_async_openai_audio_speech_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError),
+    ):
+        await openai_handler.async_audio_speech(
+            model="tts-1",
+            input="hello",
+            voice="alloy",
+            optional_params={},
+            api_key="sk-test",
+            api_base=None,
+            organization=None,
+            project=None,
+            max_retries=0,
+            timeout=30,
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+def test_openai_audio_transcription_uses_model_proxy():
+    from litellm.llms.openai.transcriptions.handler import OpenAIAudioTranscription
+    from litellm.types.utils import TranscriptionResponse
+
+    proxy = "http://127.0.0.1:8080"
+    handler = OpenAIAudioTranscription()
+
+    with (
+        patch.object(handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError),
+    ):
+        handler.audio_transcriptions(
+            model="whisper-1",
+            audio_file=b"audio-bytes",
+            optional_params={},
+            litellm_params={"proxy": proxy},
+            model_response=TranscriptionResponse(),
+            timeout=30,
+            max_retries=0,
+            logging_obj=MagicMock(),
+            api_key="sk-test",
+            api_base=None,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_async_openai_audio_transcription_uses_model_proxy():
+    from litellm.llms.openai.transcriptions.handler import OpenAIAudioTranscription
+    from litellm.types.utils import TranscriptionResponse
+
+    proxy = "http://127.0.0.1:8080"
+    handler = OpenAIAudioTranscription()
+
+    with (
+        patch.object(handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError),
+    ):
+        await handler.async_audio_transcriptions(
+            audio_file=b"audio-bytes",
+            data={"model": "whisper-1", "file": b"audio-bytes"},
+            model_response=TranscriptionResponse(),
+            timeout=30,
+            logging_obj=MagicMock(),
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy

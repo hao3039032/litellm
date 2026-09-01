@@ -383,6 +383,7 @@ class Logging(LiteLLMLoggingBaseClass):
         if kwargs is not None:
             litellm_params = get_litellm_params(**kwargs)
             litellm_params = scrub_sensitive_keys_in_metadata(litellm_params)
+            litellm_params.pop("proxy", None)
 
         self.litellm_params = litellm_params
 
@@ -543,7 +544,7 @@ class Logging(LiteLLMLoggingBaseClass):
         self.user = user
         self.litellm_params = {
             **self.litellm_params,
-            **scrub_sensitive_keys_in_metadata(litellm_params),
+            **{k: v for k, v in scrub_sensitive_keys_in_metadata(litellm_params).items() if k != "proxy"},
         }
         self.litellm_request_debug = litellm_params.get("litellm_request_debug", False)
         self.logger_fn = litellm_params.get("logger_fn", None)

@@ -11,7 +11,7 @@ from litellm.types.router import CredentialLiteLLMParams
 from litellm._logging import verbose_logger
 
 
-def _is_proxy_admin_request(request_kwargs: Optional[Mapping[str, object]]) -> bool:
+def _is_proxy_admin_request(request_kwargs: Mapping[str, object] | None) -> bool:
     if request_kwargs is None:
         return False
     metadata_value = request_kwargs.get("metadata")

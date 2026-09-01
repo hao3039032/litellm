@@ -520,7 +520,7 @@ async def acompletion(
         non_default_params=kwargs,
         messages=cast(list[AllMessageValues], messages),  # cast-ok: acompletion types messages as a bare List
         model=model,
-        custom_llm_provider=cast(Optional[str], custom_llm_provider),  # cast-ok: read from untyped kwargs
+        custom_llm_provider=cast(str | None, custom_llm_provider),  # cast-ok: read from untyped kwargs
         tools=tools,
     )
 
@@ -5078,7 +5078,7 @@ def completion(  # type: ignore
         non_default_params=non_default_params,
         messages=cast(list[AllMessageValues], messages),  # cast-ok: completion types messages as a bare List
         model=model,
-        custom_llm_provider=cast(Optional[str], kwargs.get("custom_llm_provider")),  # cast-ok: untyped kwargs
+        custom_llm_provider=cast(str | None, kwargs.get("custom_llm_provider")),  # cast-ok: untyped kwargs
         tools=tools,
     )
 
@@ -5361,7 +5361,7 @@ def completion(  # type: ignore
             litellm_params=litellm_params,
             custom_llm_provider=custom_llm_provider,
         )
-        if custom_llm_provider == "openai" and isinstance(kwargs.get("proxy"), str):
+        if isinstance(kwargs.get("proxy"), str):
             litellm_params = {**litellm_params, "proxy": kwargs["proxy"]}
         if mock_response or mock_tool_calls or mock_timeout:
             kwargs.pop("mock_timeout", None)  # remove for any fallbacks triggered
@@ -6019,6 +6019,7 @@ def embedding(
         api_base=api_base,
         api_key=api_key,
     )
+    proxy = kwargs.get("proxy") if isinstance(kwargs.get("proxy"), str) else None
 
     if dynamic_api_key is not None:
         api_key = dynamic_api_key
@@ -6167,6 +6168,7 @@ def embedding(
                 aembedding=aembedding,
                 max_retries=max_retries,
                 shared_session=shared_session,
+                proxy=proxy,
             )
         elif custom_llm_provider == "databricks":
             api_base = api_base or litellm.api_base or get_secret("DATABRICKS_API_BASE")  # type: ignore
@@ -7938,6 +7940,7 @@ def speech(
             client=client,  # pass AsyncOpenAI, OpenAI client
             aspeech=aspeech,
             shared_session=shared_session,
+            proxy=litellm_params_dict.get("proxy"),
         )
     elif custom_llm_provider == "azure":
         # Check if this is Azure Speech Service (Cognitive Services TTS)

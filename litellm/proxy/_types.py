@@ -1266,7 +1266,7 @@ class NewMCPServerRequest(LiteLLMPydanticObjectBase):
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
-    issuer: Optional[str] = None
+    issuer: str | None = None
     authorization_url: Optional[str] = None
     token_url: Optional[str] = None
     registration_url: Optional[str] = None
@@ -1372,7 +1372,7 @@ class UpdateMCPServerRequest(LiteLLMPydanticObjectBase):
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
-    issuer: Optional[str] = None
+    issuer: str | None = None
     authorization_url: Optional[str] = None
     token_url: Optional[str] = None
     registration_url: Optional[str] = None
@@ -2125,8 +2125,8 @@ class ConfigList(LiteLLMPydanticObjectBase):
     field_default_value: Any
     premium_field: bool = False
     nested_fields: Optional[List[FieldDetail]] = None  # For nested dictionary or Pydantic fields
-    field_options: Optional[list[str]] = None  # Allowed values, for field_type == "Select"
-    field_tab: Optional[str] = None  # Admin UI sub-tab this field renders under; None groups it with the rest
+    field_options: list[str] | None = None  # Allowed values, for field_type == "Select"
+    field_tab: str | None = None  # Admin UI sub-tab this field renders under; None groups it with the rest
 
 
 class UserHeaderMapping(LiteLLMPydanticObjectBase):

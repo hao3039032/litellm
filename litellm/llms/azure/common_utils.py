@@ -409,6 +409,7 @@ class BaseAzureLLM(BaseOpenAILLM):
         client_initialization_params: dict = locals()
         client_initialization_params["is_async"] = _is_async
         _lp = litellm_params or {}
+        client_initialization_params["proxy"] = _lp.get("proxy")
         _ad_provider = _lp.get("azure_ad_token_provider")
         _ad_token = _lp.get("azure_ad_token")
         _client_secret = _lp.get("client_secret")
@@ -589,10 +590,11 @@ class BaseAzureLLM(BaseOpenAILLM):
             "azure_ad_token_provider": azure_ad_token_provider,
         }
         # init http client + SSL Verification settings
+        proxy = litellm_params.get("proxy")
         if is_async is True:
-            azure_client_params["http_client"] = self._get_async_http_client()
+            azure_client_params["http_client"] = self._get_async_http_client(proxy=proxy)
         else:
-            azure_client_params["http_client"] = self._get_sync_http_client()
+            azure_client_params["http_client"] = self._get_sync_http_client(proxy=proxy)
 
         if max_retries is not None:
             azure_client_params["max_retries"] = max_retries

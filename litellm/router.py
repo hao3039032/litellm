@@ -75,7 +75,7 @@ from litellm.litellm_core_utils.coroutine_checker import coroutine_checker
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.litellm_core_utils.dd_tracing import tracer
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLogging
-from litellm.litellm_core_utils.proxy_utils import resolve_model_proxy
+from litellm.litellm_core_utils.proxy_utils import mask_model_proxy, resolve_model_proxy
 from litellm.litellm_core_utils.secret_redaction import redact_string
 from litellm.litellm_core_utils.sensitive_data_masker import (
     SensitiveDataMasker,
@@ -260,7 +260,7 @@ else:
     PreRoutingHookResponse = Any
 
 
-def _cost_value_as_float(value: Union[str, int, float, None]) -> Optional[float]:
+def _cost_value_as_float(value: Union[str, int, float, None]) -> float | None:
     if value is None:
         return None
     try:
@@ -1010,7 +1010,7 @@ class Router:
 
     _OVERRIDABLE_ROUTING_STRATEGIES: frozenset[str] = frozenset({"simple-shuffle", *_DEFAULT_SELECTOR_ATTR_BY_STRATEGY})
 
-    def _get_request_routing_strategy_override(self, request_kwargs: Optional[dict]) -> Optional[str]:
+    def _get_request_routing_strategy_override(self, request_kwargs: dict | None) -> str | None:
         """
         Reads a per-request `routing_strategy` override (forwarded by the proxy
         from key/team `router_settings`) out of the request kwargs.
@@ -1035,7 +1035,7 @@ class Router:
             return None
         return strategy
 
-    def _get_override_strategy_selector(self, strategy: str) -> Optional[Any]:
+    def _get_override_strategy_selector(self, strategy: str) -> Any | None:
         """
         Returns the selector for a per-request strategy override.
 
@@ -1056,9 +1056,7 @@ class Router:
                 )
             return self._override_selectors[strategy]
 
-    def _get_routing_context(
-        self, model: str, request_kwargs: Optional[dict] = None
-    ) -> tuple[Optional[str], Optional[Any]]:
+    def _get_routing_context(self, model: str, request_kwargs: dict | None = None) -> tuple[str | None, Any | None]:
         """
         Resolves the routing strategy and selector to use for the given model.
 
@@ -1683,12 +1681,21 @@ class Router:
         try:
             _deployment_copy = copy.deepcopy(deployment)
             litellm_params: dict = _deployment_copy["litellm_params"]
+            proxy = litellm_params.get("proxy")
+            masked_litellm_params = (
+                {**litellm_params, "proxy": mask_model_proxy(proxy)} if isinstance(proxy, str) else litellm_params
+            )
 
             if litellm.redact_user_api_key_info:
                 masker = SensitiveDataMasker(visible_prefix=2, visible_suffix=0)
-                _deployment_copy["litellm_params"] = masker.mask_dict(litellm_params)
-            elif "api_key" in litellm_params:
-                litellm_params["api_key"] = litellm_params["api_key"][:2] + "*" * 10
+                _deployment_copy["litellm_params"] = masker.mask_dict(masked_litellm_params)
+            elif "api_key" in masked_litellm_params:
+                _deployment_copy["litellm_params"] = {
+                    **masked_litellm_params,
+                    "api_key": masked_litellm_params["api_key"][:2] + "*" * 10,
+                }
+            else:
+                _deployment_copy["litellm_params"] = masked_litellm_params
 
             return _deployment_copy
         except Exception as e:
@@ -10266,7 +10273,7 @@ class Router:
     def _try_early_resolve_deployments_for_model_not_in_names(
         self,
         model: str,
-        request_team_id: Optional[str],
+        request_team_id: str | None,
         include_team_models: bool = False,
     ) -> Optional[Tuple[str, Union[List, Dict]]]:
         """

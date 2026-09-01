@@ -176,7 +176,7 @@ def _shared_key_spec(
     )
 
 
-def _id_jag_spec(server: MCPServer, resource: str) -> Optional[ServerSpec]:
+def _id_jag_spec(server: MCPServer, resource: str) -> ServerSpec | None:
     """Build an ID-JAG spec from the v1 server's raw fields, or defer (None) if half-configured.
 
     The enum already routes here, but a server missing an endpoint, ``client_id``, or any client-auth
@@ -206,7 +206,7 @@ def _id_jag_spec(server: MCPServer, resource: str) -> Optional[ServerSpec]:
     )
 
 
-def _id_jag_client_auth(server: MCPServer) -> Optional[ClientAuth]:
+def _id_jag_client_auth(server: MCPServer) -> ClientAuth | None:
     """Private-key JWT when a key is configured, else client_secret, else None (defer to v1)."""
     if server.client_private_key:
         return PrivateKeyJwtAuth(

@@ -358,7 +358,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         organization: Optional[str] = None,
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ) -> Optional[Union[OpenAI, AsyncOpenAI]]:
         client_initialization_params: Dict = locals()
         if client is None:
@@ -619,7 +619,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             inference_params = optional_params.copy()
             stream_options: Optional[dict] = inference_params.pop("stream_options", None)
             stream: Optional[bool] = inference_params.pop("stream", False)
-            proxy: Optional[str] = litellm_params.get("proxy")
+            proxy: str | None = litellm_params.get("proxy")
             provider_config: Optional[BaseConfig] = None
 
             if custom_llm_provider is not None and model is not None:
@@ -857,7 +857,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         stream_options: Optional[dict] = None,
         fake_stream: bool = False,
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         response = None
         data = await provider_config.async_transform_request(
@@ -975,7 +975,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         max_retries=None,
         headers=None,
         stream_options: Optional[dict] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         data["stream"] = True
         data.update(self.get_stream_options(stream_options=stream_options, api_base=api_base))
@@ -1039,7 +1039,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         drop_params: Optional[bool] = None,
         stream_options: Optional[dict] = None,
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         response = None
         data = provider_config.transform_request(
@@ -1209,6 +1209,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         client: Optional[AsyncOpenAI] = None,
         max_retries=None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: str | None = None,
     ):
         try:
             openai_aclient: AsyncOpenAI = self._get_openai_client(  # type: ignore
@@ -1219,6 +1220,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 max_retries=max_retries,
                 client=client,
                 shared_session=shared_session,
+                proxy=proxy,
             )
             headers, response = await self.make_openai_embedding_request(
                 openai_aclient=openai_aclient,
@@ -1281,6 +1283,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         aembedding=None,
         max_retries: Optional[int] = None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: str | None = None,
     ) -> EmbeddingResponse:
         super().embedding()
         try:
@@ -1307,6 +1310,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     client=client,
                     max_retries=max_retries,
                     shared_session=shared_session,
+                    proxy=proxy,
                 )
 
             openai_client: OpenAI = self._get_openai_client(  # type: ignore
@@ -1316,6 +1320,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 timeout=timeout,
                 max_retries=max_retries,
                 client=client,
+                proxy=proxy,
             )
 
             ## embedding CALL
@@ -1518,6 +1523,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         aspeech: Optional[bool] = None,
         client=None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: str | None = None,
     ) -> HttpxBinaryResponseContent:
         if aspeech is not None and aspeech is True:
             return self.async_audio_speech(
@@ -1533,6 +1539,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 timeout=timeout,
                 client=client,
                 shared_session=shared_session,
+                proxy=proxy,
             )  # type: ignore
 
         openai_client = self._get_openai_client(
@@ -1543,6 +1550,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             max_retries=max_retries,
             client=client,
             shared_session=shared_session,
+            proxy=proxy,
         )
 
         response = cast(OpenAI, openai_client).audio.speech.create(
@@ -1567,6 +1575,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         timeout: Union[float, httpx.Timeout],
         client=None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: str | None = None,
     ) -> HttpxBinaryResponseContent:
         openai_client = cast(
             AsyncOpenAI,
@@ -1578,6 +1587,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 max_retries=max_retries,
                 client=client,
                 shared_session=shared_session,
+                proxy=proxy,
             ),
         )
 

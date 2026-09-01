@@ -112,6 +112,7 @@ class OpenAIAudioTranscription(OpenAIChatCompletion):
                 max_retries=max_retries,
                 logging_obj=logging_obj,
                 shared_session=shared_session,
+                proxy=litellm_params.get("proxy"),
             )
 
         openai_client: OpenAI = self._get_openai_client(  # type: ignore
@@ -121,6 +122,7 @@ class OpenAIAudioTranscription(OpenAIChatCompletion):
             timeout=timeout,
             max_retries=max_retries,
             client=client,
+            proxy=litellm_params.get("proxy"),
         )
 
         ## LOGGING
@@ -172,6 +174,7 @@ class OpenAIAudioTranscription(OpenAIChatCompletion):
         client=None,
         max_retries=None,
         shared_session: Optional["ClientSession"] = None,
+        proxy: str | None = None,
     ):
         try:
             openai_aclient: AsyncOpenAI = self._get_openai_client(  # type: ignore
@@ -182,6 +185,7 @@ class OpenAIAudioTranscription(OpenAIChatCompletion):
                 max_retries=max_retries,
                 client=client,
                 shared_session=shared_session,
+                proxy=proxy,
             )
 
             ## LOGGING

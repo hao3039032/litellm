@@ -261,10 +261,10 @@ class AzureAIAgentsHandler:
         headers: Optional[dict] = None,
     ) -> ModelResponse:
         """Execute synchronous completion using Azure Agent Service."""
-        from litellm.llms.custom_httpx.http_handler import _get_httpx_client
+        from litellm.llms.custom_httpx.http_handler import _get_httpx_client, build_httpx_handler_params
 
         if client is None:
-            client = _get_httpx_client(params={"ssl_verify": litellm_params.get("ssl_verify", None)})
+            client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
 
         (
             headers,
@@ -381,12 +381,12 @@ class AzureAIAgentsHandler:
     ) -> ModelResponse:
         """Execute asynchronous completion using Azure Agent Service."""
         import litellm
-        from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
+        from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params, get_async_httpx_client
 
         if client is None:
             client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders.AZURE_AI,
-                params={"ssl_verify": litellm_params.get("ssl_verify", None)},
+                params=build_httpx_handler_params(litellm_params),
             )
 
         (
@@ -502,7 +502,7 @@ class AzureAIAgentsHandler:
     ) -> AsyncIterator:
         """Execute async streaming completion using Azure Agent Service with native SSE."""
         import litellm
-        from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
+        from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params, get_async_httpx_client
 
         (
             headers,
@@ -536,7 +536,7 @@ class AzureAIAgentsHandler:
         # Use LiteLLM's async HTTP client for streaming
         client = get_async_httpx_client(
             llm_provider=litellm.LlmProviders.AZURE_AI,
-            params={"ssl_verify": litellm_params.get("ssl_verify", None)},
+            params=build_httpx_handler_params(litellm_params),
         )
 
         response = await client.post(

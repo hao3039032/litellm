@@ -5,16 +5,14 @@ import pathlib
 import ssl
 import sys
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import certifi
 import httpx
 import pytest
 from aiohttp import ClientSession, TCPConnector
 
-sys.path.insert(
-    0, os.path.abspath("../../../..")
-)  # Adds the parent directory to the system path
+sys.path.insert(0, os.path.abspath("../../../.."))  # Adds the parent directory to the system path
 import litellm
 from litellm.llms.custom_httpx.aiohttp_transport import LiteLLMAiohttpTransport
 from litellm.llms.custom_httpx.http_handler import (
@@ -57,9 +55,7 @@ async def test_async_post_streaming_status_error_should_not_wait_forever_for_bod
 
     litellm_handler = AsyncHTTPHandler()
     await litellm_handler.client.aclose()
-    litellm_handler.client = httpx.AsyncClient(
-        transport=httpx.MockTransport(mock_handler)
-    )
+    litellm_handler.client = httpx.AsyncClient(transport=httpx.MockTransport(mock_handler))
     try:
         with pytest.raises(MaskedHTTPStatusError) as exc_info:
             await asyncio.wait_for(
@@ -142,17 +138,109 @@ def test_async_http_handler_configures_model_proxy():
     assert client.call_args.kwargs["proxy"] == proxy
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["put", "patch", "delete"])
+async def test_async_http_handler_retry_preserves_model_proxy(method_name):
+    proxy = "http://proxy-user:proxy-password@127.0.0.1:8080"
+    shared_session = MagicMock(spec=ClientSession)
+    handler = AsyncHTTPHandler()
+    await handler.client.aclose()
+    request = httpx.Request(method_name.upper(), "https://api.openai.com/v1/test")
+    handler.client = MagicMock()
+    handler.client.build_request.return_value = request
+    handler.client.send = AsyncMock(side_effect=httpx.ConnectError("failed", request=request))
+    handler.client.aclose = AsyncMock()
+    handler.proxy = proxy
+    handler.ssl_verify = False
+    handler.shared_session = shared_session
+    retry_client = MagicMock()
+    retry_client.aclose = AsyncMock()
+    response = httpx.Response(200, request=request)
+
+    with (
+        patch.object(handler, "create_client", return_value=retry_client) as create_client,
+        patch.object(handler, "single_connection_post_request", AsyncMock(return_value=response)),
+    ):
+        result = await getattr(handler, method_name)(str(request.url))
+
+    assert result is response
+    create_client.assert_called_once_with(
+        timeout=handler.timeout,
+        event_hooks=handler.event_hooks,
+        ssl_verify=False,
+        shared_session=shared_session,
+        proxy=proxy,
+    )
+
+
 def test_sync_http_handler_builds_socks5h_transport():
     handler = HTTPHandler(proxy="socks5h://127.0.0.1:1080")
     try:
-        proxy_pools = [
-            transport._pool
-            for transport in handler.client._mounts.values()
-            if transport is not None
-        ]
+        proxy_pools = [transport._pool for transport in handler.client._mounts.values() if transport is not None]
         assert any(type(pool).__name__ == "SOCKSProxy" for pool in proxy_pools)
     finally:
         handler.close()
+
+
+def test_build_httpx_handler_params_from_dict():
+    from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params
+
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    assert build_httpx_handler_params({"proxy": proxy, "ssl_verify": False}) == {
+        "ssl_verify": False,
+        "proxy": proxy,
+    }
+    assert build_httpx_handler_params({"proxy": proxy}) == {"ssl_verify": None, "proxy": proxy}
+    assert build_httpx_handler_params({}) == {"ssl_verify": None}
+    assert build_httpx_handler_params(None) == {"ssl_verify": None}
+
+
+def test_build_httpx_handler_params_from_generic_litellm_params():
+    from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params
+    from litellm.types.router import GenericLiteLLMParams
+
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    assert build_httpx_handler_params(GenericLiteLLMParams(proxy=proxy)) == {
+        "ssl_verify": None,
+        "proxy": proxy,
+    }
+    assert build_httpx_handler_params(GenericLiteLLMParams()) == {"ssl_verify": None}
+
+
+def test_get_httpx_client_separates_cached_clients_by_proxy():
+    from litellm.caching.llm_caching_handler import LLMClientCache
+
+    litellm.in_memory_llm_clients_cache = LLMClientCache()
+
+    proxy_a = "http://127.0.0.1:18081"
+    proxy_b = "http://127.0.0.1:18082"
+
+    handler_a = _get_httpx_client(params={"proxy": proxy_a})
+    handler_b = _get_httpx_client(params={"proxy": proxy_b})
+    handler_a_again = _get_httpx_client(params={"proxy": proxy_a})
+    handler_no_proxy = _get_httpx_client(params={})
+
+    try:
+        assert handler_a is not handler_b
+        assert handler_a is handler_a_again
+        assert handler_no_proxy is not handler_a
+        assert handler_no_proxy is not handler_b
+
+        def proxy_pools(handler):
+            return {
+                type(transport._pool).__name__
+                for transport in handler.client._mounts.values()
+                if transport is not None
+            }
+
+        assert proxy_pools(handler_a) == {"HTTPProxy"}
+        assert proxy_pools(handler_b) == {"HTTPProxy"}
+        assert proxy_pools(handler_no_proxy) == set()
+    finally:
+        for handler in {id(handler_a): handler_a, id(handler_b): handler_b, id(handler_no_proxy): handler_no_proxy}.values():
+            handler.close()
 
 
 @pytest.mark.asyncio
@@ -274,9 +362,7 @@ async def test_ssl_verification_with_aiohttp_transport():
             transport_connector = transport._get_valid_client_session().connector
             assert isinstance(transport_connector, TCPConnector)
 
-            aiohttp_session = aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False)
-            )
+            aiohttp_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
             try:
                 aiohttp_connector = aiohttp_session.connector
                 assert isinstance(aiohttp_connector, aiohttp.TCPConnector)
@@ -396,9 +482,7 @@ async def test_aiohttp_transport_trust_env_setting(monkeypatch):
         monkeypatch.setenv("AIOHTTP_TRUST_ENV", "False")
         transport_with_false_env = AsyncHTTPHandler._create_aiohttp_transport()
         transports.append(transport_with_false_env)
-        client_session_with_false_env = (
-            transport_with_false_env._get_valid_client_session()
-        )
+        client_session_with_false_env = transport_with_false_env._get_valid_client_session()
 
         # Should respect the litellm.aiohttp_trust_env setting when env var is False
         assert client_session_with_false_env._trust_env == default_trust_env
@@ -533,7 +617,8 @@ async def test_get_async_httpx_client_with_shared_session():
 
     # Test with shared session
     client = get_async_httpx_client(
-        llm_provider=LlmProviders.ANTHROPIC, shared_session=mock_session  # type: ignore
+        llm_provider=LlmProviders.ANTHROPIC,
+        shared_session=mock_session,  # type: ignore
     )
 
     # Verify the client was created successfully
@@ -552,9 +637,7 @@ async def test_get_async_httpx_client_without_shared_session():
     from litellm.types.utils import LlmProviders
 
     # Test without shared session
-    client = get_async_httpx_client(
-        llm_provider=LlmProviders.ANTHROPIC, shared_session=None
-    )
+    client = get_async_httpx_client(llm_provider=LlmProviders.ANTHROPIC, shared_session=None)
 
     # Verify the client was created successfully
     assert client is not None
@@ -631,11 +714,13 @@ async def test_session_reuse_integration():
 
     # Create two clients with the same session
     client1 = get_async_httpx_client(
-        llm_provider=LlmProviders.ANTHROPIC, shared_session=mock_session  # type: ignore
+        llm_provider=LlmProviders.ANTHROPIC,
+        shared_session=mock_session,  # type: ignore
     )
 
     client2 = get_async_httpx_client(
-        llm_provider=LlmProviders.OPENAI, shared_session=mock_session  # type: ignore
+        llm_provider=LlmProviders.OPENAI,
+        shared_session=mock_session,  # type: ignore
     )
 
     # Both clients should be created successfully
@@ -688,9 +773,7 @@ async def test_session_validation():
         (None, None, None, False),  # None value - skip configuration
     ],
 )
-def test_ssl_ecdh_curve(
-    env_curve, litellm_curve, expected_curve, should_call, monkeypatch
-):
+def test_ssl_ecdh_curve(env_curve, litellm_curve, expected_curve, should_call, monkeypatch):
     """Test SSL ECDH curve configuration with valid curves and precedence"""
     from litellm.llms.custom_httpx.http_handler import _ssl_context_cache
 
@@ -922,9 +1005,7 @@ class TestDefaultCachedClientTimeoutHonorsRequestTimeout:
         assert resolved.read == 300.0
         assert resolved.connect == 5.0
 
-    def test_cached_async_client_built_with_explicit_request_timeout(
-        self, restore_request_timeout
-    ):
+    def test_cached_async_client_built_with_explicit_request_timeout(self, restore_request_timeout):
         from litellm.caching.llm_caching_handler import LLMClientCache
         from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
         from litellm.types.utils import LlmProviders

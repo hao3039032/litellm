@@ -1977,6 +1977,123 @@ def test_azure_v1_client_cache_reuses_for_identical_ad_config(api_version):
     assert client_a is client_b
 
 
+def test_azure_client_cache_separates_distinct_model_proxies():
+    """Deployments sharing api_base/api_version but with different proxies must not
+    share a cached Azure client, otherwise one deployment's traffic egresses through
+    another deployment's proxy. Identical proxies must still share the client."""
+    from openai import AsyncAzureOpenAI
+
+    litellm.in_memory_llm_clients_cache._cache = {}
+
+    base_llm = BaseAzureLLM()
+    api_base = "https://test.openai.azure.com"
+    api_version = "2023-05-15"
+    proxy_a = "http://127.0.0.1:18081"
+    proxy_b = "http://127.0.0.1:18082"
+
+    init_return = {
+        "api_key": "test-key",
+        "azure_endpoint": api_base,
+        "api_version": api_version,
+        "azure_ad_token": None,
+        "azure_ad_token_provider": None,
+    }
+
+    common = {
+        "api_key": "test-key",
+        "api_base": api_base,
+        "api_version": api_version,
+        "_is_async": True,
+    }
+
+    with patch.object(base_llm, "initialize_azure_sdk_client") as mock_init:
+        mock_init.return_value = dict(init_return)
+        client_a = base_llm.get_azure_openai_client(
+            litellm_params={"proxy": proxy_a},
+            **common,
+        )
+        client_b = base_llm.get_azure_openai_client(
+            litellm_params={"proxy": proxy_b},
+            **common,
+        )
+        client_a_again = base_llm.get_azure_openai_client(
+            litellm_params={"proxy": proxy_a},
+            **common,
+        )
+        client_no_proxy = base_llm.get_azure_openai_client(
+            litellm_params={},
+            **common,
+        )
+
+    assert isinstance(client_a, AsyncAzureOpenAI)
+    assert isinstance(client_b, AsyncAzureOpenAI)
+    assert client_a is not client_b
+    assert client_a is client_a_again
+    assert client_no_proxy is not client_a
+    assert client_no_proxy is not client_b
+
+
+def test_initialize_azure_sdk_client_passes_proxy_to_http_client(monkeypatch):
+    monkeypatch.setattr(litellm, "client_session", None)
+    monkeypatch.setattr(litellm, "aclient_session", None)
+    base_llm = BaseAzureLLM()
+    proxy = "http://127.0.0.1:18081"
+
+    sync_params = base_llm.initialize_azure_sdk_client(
+        litellm_params={"proxy": proxy},
+        api_key="test-key",
+        api_base="https://test.openai.azure.com",
+        model_name="gpt-4",
+        api_version="2023-05-15",
+        is_async=False,
+    )
+    sync_client = sync_params["http_client"]
+    try:
+        sync_pools = {
+            type(transport._pool).__name__
+            for transport in sync_client._mounts.values()
+            if transport is not None
+        }
+        assert sync_pools == {"HTTPProxy"}
+    finally:
+        sync_client.close()
+
+    async_params = base_llm.initialize_azure_sdk_client(
+        litellm_params={"proxy": proxy},
+        api_key="test-key",
+        api_base="https://test.openai.azure.com",
+        model_name="gpt-4",
+        api_version="2023-05-15",
+        is_async=True,
+    )
+    async_client = async_params["http_client"]
+    async_pools = {
+        type(transport._pool).__name__
+        for transport in async_client._mounts.values()
+        if transport is not None
+    }
+    assert async_pools == {"AsyncHTTPProxy"}
+
+
+def test_initialize_azure_sdk_client_without_proxy_builds_plain_http_client(monkeypatch):
+    monkeypatch.setattr(litellm, "client_session", None)
+    base_llm = BaseAzureLLM()
+
+    params = base_llm.initialize_azure_sdk_client(
+        litellm_params={},
+        api_key="test-key",
+        api_base="https://test.openai.azure.com",
+        model_name="gpt-4",
+        api_version="2023-05-15",
+        is_async=False,
+    )
+    http_client = params["http_client"]
+    try:
+        assert all(transport is None for transport in http_client._mounts.values())
+    finally:
+        http_client.close()
+
+
 def test_azure_traditional_api_uses_azure_openai_client():
     """
     Test that traditional Azure API versions still use AzureOpenAI client.

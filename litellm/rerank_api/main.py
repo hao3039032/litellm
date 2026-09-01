@@ -170,6 +170,7 @@ def rerank(
             "model_info": model_info,
             "preset_cache_key": None,
             "stream_response": {},
+            **({"proxy": kwargs["proxy"]} if isinstance(kwargs.get("proxy"), str) else {}),
             **optional_params.model_dump(exclude_unset=True),
         }
 

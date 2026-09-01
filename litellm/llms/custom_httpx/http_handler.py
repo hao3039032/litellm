@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         Logging as LiteLLMLoggingObject,
     )
     from litellm.llms.custom_httpx.aiohttp_transport import LiteLLMAiohttpTransport
+    from litellm.types.router import GenericLiteLLMParams
 else:
     LlmProviders = Any
     LiteLLMLoggingObject = Any
@@ -516,7 +517,7 @@ class AsyncHTTPHandler:
         client_alias: Optional[str] = None,  # name for client in logs
         ssl_verify: Optional[VerifyTypes] = None,
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         self.timeout = timeout
         self.event_hooks = event_hooks
@@ -538,7 +539,7 @@ class AsyncHTTPHandler:
         event_hooks: Optional[Mapping[str, List[Callable[..., Any]]]],
         ssl_verify: Optional[VerifyTypes] = None,
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ) -> httpx.AsyncClient:
         # Get unified SSL configuration
         ssl_config = get_ssl_configuration(ssl_verify)
@@ -724,7 +725,13 @@ class AsyncHTTPHandler:
             return response
         except (httpx.RemoteProtocolError, httpx.ConnectError):
             # Retry the request with a new session if there is a connection error
-            new_client = self.create_client(timeout=timeout, event_hooks=self.event_hooks)
+            new_client = self.create_client(
+                timeout=timeout,
+                event_hooks=self.event_hooks,
+                ssl_verify=self.ssl_verify,
+                shared_session=self.shared_session,
+                proxy=self.proxy,
+            )
             try:
                 return await self.single_connection_post_request(
                     url=url,
@@ -788,7 +795,13 @@ class AsyncHTTPHandler:
             return response
         except (httpx.RemoteProtocolError, httpx.ConnectError):
             # Retry the request with a new session if there is a connection error
-            new_client = self.create_client(timeout=timeout, event_hooks=self.event_hooks)
+            new_client = self.create_client(
+                timeout=timeout,
+                event_hooks=self.event_hooks,
+                ssl_verify=self.ssl_verify,
+                shared_session=self.shared_session,
+                proxy=self.proxy,
+            )
             try:
                 return await self.single_connection_post_request(
                     url=url,
@@ -852,7 +865,13 @@ class AsyncHTTPHandler:
             return response
         except (httpx.RemoteProtocolError, httpx.ConnectError):
             # Retry the request with a new session if there is a connection error
-            new_client = self.create_client(timeout=timeout, event_hooks=self.event_hooks)
+            new_client = self.create_client(
+                timeout=timeout,
+                event_hooks=self.event_hooks,
+                ssl_verify=self.ssl_verify,
+                shared_session=self.shared_session,
+                proxy=self.proxy,
+            )
             try:
                 return await self.single_connection_post_request(
                     url=url,
@@ -1096,7 +1115,7 @@ class HTTPHandler:
         disable_default_headers: Optional[
             bool
         ] = False,  # arize phoenix returns different API responses when user agent header in request
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         if timeout is None:
             timeout = _DEFAULT_TIMEOUT
@@ -1387,6 +1406,17 @@ class HTTPHandler:
             return HTTPTransport(local_address="0.0.0.0")
         else:
             return getattr(litellm, "sync_transport", None)
+
+
+def build_httpx_handler_params(
+    litellm_params: Union["GenericLiteLLMParams", Dict[str, Any], None],
+) -> Dict[str, Any]:
+    source = litellm_params if litellm_params is not None else {}
+    proxy = source.get("proxy")
+    return {
+        "ssl_verify": source.get("ssl_verify", None),
+        **({"proxy": proxy} if proxy is not None else {}),
+    }
 
 
 def get_async_httpx_client(

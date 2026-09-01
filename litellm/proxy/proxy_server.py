@@ -461,8 +461,8 @@ try:
         shutdown_billing_metrics_recorder as _shutdown_billing_metrics_recorder,
     )
 
-    build_billing_metrics_recorder: Optional[Callable[..., Optional[BillingRecorder]]] = _build_billing_metrics_recorder
-    shutdown_billing_metrics_recorder: Optional[Callable[[], None]] = _shutdown_billing_metrics_recorder
+    build_billing_metrics_recorder: Callable[..., Optional[BillingRecorder]] | None = _build_billing_metrics_recorder
+    shutdown_billing_metrics_recorder: Callable[[], None] | None = _shutdown_billing_metrics_recorder
 except ImportError:
     build_billing_metrics_recorder = None
     shutdown_billing_metrics_recorder = None

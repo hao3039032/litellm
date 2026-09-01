@@ -81,7 +81,7 @@
     "limit": 0
   },
   "reportPossiblyUnboundVariable": {
-    "limit": 77
+    "limit": 76
   },
   "reportPrivateUsage": {
     "limit": 2438
@@ -138,7 +138,7 @@
     "limit": 206
   },
   "reportUnusedImport": {
-    "limit": 1005
+    "limit": 1004
   },
   "reportUnusedVariable": {
     "limit": 1297

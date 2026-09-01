@@ -883,7 +883,7 @@ def run_server(
     timeout_worker_healthcheck,
     max_requests_before_restart,
     max_requests_before_restart_jitter: Optional[int],
-    limit_concurrency: Optional[int],
+    limit_concurrency: int | None,
     enforce_prisma_migration_check: bool,
     use_v2_migration_resolver: bool,
     reload: bool,

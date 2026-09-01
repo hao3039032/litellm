@@ -197,6 +197,156 @@ async def test_async_openai_responses_handler_uses_model_proxy():
     }
 
 
+def test_completion_passes_model_proxy_for_non_openai_provider():
+    """A non-OpenAI provider (anthropic) with a deployment-level proxy must hand
+    the proxy to _get_httpx_client. Guards against reintroducing a
+    `custom_llm_provider == "openai"` gate on the shared httpx client path."""
+    handler = BaseLLMHTTPHandler()
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    config = Mock()
+    config.validate_environment.return_value = {}
+    config.get_complete_url.return_value = "https://api.anthropic.com/v1/messages"
+    config.transform_request.return_value = {"model": "claude-haiku-4-5", "messages": []}
+    config.sign_request.return_value = ({}, None)
+    config.should_fake_stream.return_value = False
+    config.max_retry_on_unprocessable_entity_error = 1
+    sentinel_response = Mock()
+    config.transform_response.return_value = sentinel_response
+
+    client = Mock(spec=HTTPHandler)
+    client.post.return_value = httpx.Response(
+        200,
+        json={"id": "msg_1"},
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+
+    with patch(
+        "litellm.llms.custom_httpx.llm_http_handler._get_httpx_client",
+        return_value=client,
+    ) as get_httpx_client:
+        result = handler.completion(
+            model="claude-haiku-4-5",
+            messages=[{"role": "user", "content": "hi"}],
+            api_base=None,
+            custom_llm_provider="anthropic",
+            model_response=Mock(),
+            encoding=Mock(),
+            logging_obj=Mock(),
+            optional_params={},
+            timeout=30.0,
+            litellm_params={"proxy": proxy},
+            acompletion=False,
+            provider_config=config,
+        )
+
+    assert result is sentinel_response
+    get_httpx_client.assert_called_once_with(params={"ssl_verify": None, "proxy": proxy})
+
+
+@pytest.mark.asyncio
+async def test_async_completion_passes_model_proxy_for_non_openai_provider(monkeypatch):
+    monkeypatch.setattr(litellm, "callbacks", [])
+    handler = BaseLLMHTTPHandler()
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    config = Mock()
+    config.max_retry_on_unprocessable_entity_error = 1
+    sentinel_response = Mock()
+    config.transform_response.return_value = sentinel_response
+
+    client = Mock(spec=AsyncHTTPHandler)
+    client.post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "msg_1"},
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        )
+    )
+    logging_obj = Mock()
+    logging_obj.model_call_details = {}
+    logging_obj.dynamic_success_callbacks = []
+
+    with patch(
+        "litellm.llms.custom_httpx.llm_http_handler.get_async_httpx_client",
+        return_value=client,
+    ) as get_httpx_client:
+        result = await handler.async_completion(
+            custom_llm_provider="anthropic",
+            provider_config=config,
+            api_base="https://api.anthropic.com/v1/messages",
+            headers={},
+            data={"model": "claude-haiku-4-5", "messages": []},
+            timeout=30.0,
+            model="claude-haiku-4-5",
+            model_response=Mock(),
+            logging_obj=logging_obj,
+            messages=[{"role": "user", "content": "hi"}],
+            optional_params={},
+            litellm_params={"proxy": proxy},
+            encoding=Mock(),
+        )
+
+    assert result is sentinel_response
+    assert get_httpx_client.call_args.kwargs["params"] == {"ssl_verify": None, "proxy": proxy}
+
+
+@pytest.mark.asyncio
+async def test_async_anthropic_messages_handler_passes_model_proxy(monkeypatch):
+    """async_anthropic_messages_handler previously built its httpx client with no
+    params at all, so a deployment-level proxy was silently dropped on /v1/messages."""
+    monkeypatch.setattr(litellm, "callbacks", [])
+    handler = BaseLLMHTTPHandler()
+    proxy = "socks5h://proxy-user:proxy-password@127.0.0.1:1080"
+
+    mock_config = Mock()
+    mock_config.validate_anthropic_messages_environment = Mock(
+        return_value=({"x-api-key": "sk-test"}, "https://api.anthropic.com")
+    )
+    mock_config.should_filter_anthropic_beta_headers = Mock(return_value=False)
+    mock_config.transform_anthropic_messages_request = Mock(
+        return_value={"model": "claude-haiku-4-5", "messages": [], "max_tokens": 16}
+    )
+    mock_config.get_complete_url = Mock(return_value="https://api.anthropic.com/v1/messages")
+    mock_config.sign_request = Mock(return_value=({}, None))
+    mock_config.max_retry_on_anthropic_messages_http_error = 1
+    expected_response = {"id": "msg_1", "content": []}
+    mock_config.transform_anthropic_messages_response = Mock(return_value=expected_response)
+
+    ok_response = Mock()
+    ok_response.raise_for_status = Mock(return_value=None)
+    client = Mock(spec=AsyncHTTPHandler)
+    client.post = AsyncMock(return_value=ok_response)
+
+    logging_obj = Mock()
+    logging_obj.model_call_details = {}
+    logging_obj.dynamic_success_callbacks = []
+
+    with (
+        patch(
+            "litellm.llms.custom_httpx.llm_http_handler.get_async_httpx_client",
+            return_value=client,
+        ) as get_httpx_client,
+        patch(
+            "litellm.litellm_core_utils.get_provider_specific_headers.ProviderSpecificHeaderUtils.get_provider_specific_headers",
+            return_value=None,
+        ),
+    ):
+        await handler.async_anthropic_messages_handler(
+            model="claude-haiku-4-5",
+            messages=[{"role": "user", "content": "hi"}],
+            anthropic_messages_provider_config=mock_config,
+            anthropic_messages_optional_request_params={},
+            custom_llm_provider="anthropic",
+            litellm_params=GenericLiteLLMParams(proxy=proxy),
+            logging_obj=logging_obj,
+            api_key="sk-test",
+            kwargs={},
+        )
+
+    assert get_httpx_client.call_args.kwargs["params"] == {"ssl_verify": None, "proxy": proxy}
+
+
 def test_response_api_handler_runs_agentic_hooks_in_sync_path(monkeypatch):
     handler = BaseLLMHTTPHandler()
     config = Mock()

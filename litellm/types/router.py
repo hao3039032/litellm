@@ -240,7 +240,7 @@ class GenericLiteLLMParams(CredentialLiteLLMParams, CustomPricingLiteLLMParams):
     )
     max_retries: Optional[int] = None
     organization: Optional[str] = None  # for openai orgs
-    proxy: Optional[str] = None
+    proxy: Optional[str] = Field(default=None, repr=False)
     configurable_clientside_auth_params: CONFIGURABLE_CLIENTSIDE_AUTH_PARAMS = None
     litellm_credential_name: Optional[str] = None
 

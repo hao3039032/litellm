@@ -1,5 +1,4 @@
 import hashlib
-from typing import Optional
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 _SUPPORTED_MODEL_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
@@ -34,7 +33,7 @@ def resolve_model_proxy(proxy: str) -> str:
     return validate_model_proxy(proxy)
 
 
-def model_proxy_fingerprint(proxy: Optional[str]) -> Optional[str]:
+def model_proxy_fingerprint(proxy: str | None) -> str | None:
     if proxy is None:
         return None
     return hashlib.sha256(proxy.encode()).hexdigest()

@@ -43,7 +43,7 @@ ITPM_CACHE_KEY = "_litellm_itpm_cache_key"
 OTPM_CACHE_KEY = "_litellm_otpm_cache_key"
 
 
-def set_io_token_rate_limit_request_kwargs(kwargs: Optional[dict[str, Any]], store_in_context: bool = True) -> None:
+def set_io_token_rate_limit_request_kwargs(kwargs: dict[str, Any] | None, store_in_context: bool = True) -> None:
     # The reservation sentinels are server-only, but `metadata` is caller
     # controlled on proxy requests. Strip any client-supplied copies here (this
     # runs before the router stashes its own reservation) so a forged

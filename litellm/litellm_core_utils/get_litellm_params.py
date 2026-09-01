@@ -45,6 +45,7 @@ OPTIONAL_KWARGS_KEYS = (
             "itpm",
             "otpm",
             "use_xai_oauth",
+            "proxy",
         }
     )
     | AWS_CREDENTIAL_KWARGS_KEYS

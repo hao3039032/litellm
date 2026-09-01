@@ -202,7 +202,7 @@ class BaseOpenAILLM:
     @staticmethod
     def _get_async_http_client(
         shared_session: Optional["ClientSession"] = None,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ) -> Optional[httpx.AsyncClient]:
         if proxy is None and litellm.aclient_session is not None:
             return litellm.aclient_session
@@ -229,7 +229,7 @@ class BaseOpenAILLM:
         )
 
     @staticmethod
-    def _get_sync_http_client(proxy: Optional[str] = None) -> Optional[httpx.Client]:
+    def _get_sync_http_client(proxy: str | None = None) -> httpx.Client | None:
         if proxy is None and litellm.client_session is not None:
             return litellm.client_session
 

@@ -17,6 +17,7 @@ from litellm.llms.custom_httpx.http_handler import (
     AsyncHTTPHandler,
     HTTPHandler,
     _get_httpx_client,
+    build_httpx_handler_params,
     get_async_httpx_client,
 )
 from litellm.types.containers.main import (
@@ -209,7 +210,7 @@ class GenericContainerHandler:
 
         # Get HTTP client
         if client is None or not isinstance(client, HTTPHandler):
-            http_client = _get_httpx_client(params={"ssl_verify": litellm_params.get("ssl_verify", None)})
+            http_client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
         else:
             http_client = client
 
@@ -316,7 +317,7 @@ class GenericContainerHandler:
         if client is None or not isinstance(client, AsyncHTTPHandler):
             http_client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders.OPENAI,
-                params={"ssl_verify": litellm_params.get("ssl_verify", None)},
+                params=build_httpx_handler_params(litellm_params),
             )
         else:
             http_client = client

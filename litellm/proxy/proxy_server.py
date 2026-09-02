@@ -248,7 +248,7 @@ from litellm.litellm_core_utils.core_helpers import (
 )
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
-from litellm.litellm_core_utils.proxy_utils import resolve_model_proxy
+from litellm.litellm_core_utils.proxy_utils import mask_model_proxy, resolve_model_proxy
 from litellm.litellm_core_utils.sensitive_data_masker import (
     SensitiveDataMasker,
     mask_sensitive_keys,
@@ -14672,7 +14672,13 @@ def _redact_secret_values_in_obj(value: JsonValue, depth: int = 0) -> JsonValue:
         return "REDACTED"
     if isinstance(value, dict):
         return {
-            key: ("REDACTED" if _is_secret_general_setting_field(key) else _redact_secret_values_in_obj(sub, depth + 1))
+            key: (
+                "REDACTED"
+                if _is_secret_general_setting_field(key)
+                else mask_model_proxy(sub)
+                if key == "proxy" and isinstance(sub, str)
+                else _redact_secret_values_in_obj(sub, depth + 1)
+            )
             for key, sub in value.items()
         }
     if isinstance(value, list):

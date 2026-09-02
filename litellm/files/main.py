@@ -226,6 +226,7 @@ def create_file(
                 max_retries=optional_params.max_retries,
                 organization=openai_creds.organization,
                 create_file_data=_create_file_request,
+                proxy=optional_params.proxy,
             )
         elif custom_llm_provider == "azure":
             azure_creds = get_azure_credentials(
@@ -349,6 +350,7 @@ def file_retrieve(
                 timeout=timeout,
                 max_retries=optional_params.max_retries,
                 organization=openai_creds.organization,
+                proxy=optional_params.proxy,
             )
         elif custom_llm_provider == "azure":
             azure_creds = get_azure_credentials(
@@ -532,6 +534,7 @@ def file_delete(
                 timeout=timeout,
                 max_retries=optional_params.max_retries,
                 organization=openai_creds.organization,
+                proxy=optional_params.proxy,
             )
         elif custom_llm_provider == "azure":
             azure_creds = get_azure_credentials(
@@ -736,6 +739,7 @@ def file_list(
                 timeout=timeout,
                 max_retries=optional_params.max_retries,
                 organization=openai_creds.organization,
+                proxy=optional_params.proxy,
             )
         elif custom_llm_provider == "azure":
             azure_creds = get_azure_credentials(
@@ -938,6 +942,7 @@ def file_content(
                 timeout=timeout,
                 max_retries=optional_params.max_retries,
                 organization=openai_creds.organization,
+                proxy=optional_params.proxy,
             )
         elif custom_llm_provider == "azure":
             azure_creds = get_azure_credentials(
@@ -1065,6 +1070,7 @@ def file_content_streaming(
             organization=openai_creds.organization,
             chunk_size=chunk_size,
             client=client,
+            proxy=optional_params.proxy,
         )
     else:
         raise litellm.exceptions.BadRequestError(

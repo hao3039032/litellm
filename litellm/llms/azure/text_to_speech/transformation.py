@@ -480,6 +480,7 @@ class AzureAVATextToSpeechConfig(BaseTextToSpeechConfig):
         model: str,
         raw_response: httpx.Response,
         logging_obj: "LiteLLMLoggingObj",
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Transform Azure AVA TTS response to standard format

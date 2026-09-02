@@ -379,6 +379,7 @@ class AWSPollyTextToSpeechConfig(BaseTextToSpeechConfig, BaseAWSLLM):
         model: str,
         raw_response: httpx.Response,
         logging_obj: "LiteLLMLoggingObj",
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Transform AWS Polly response to standard format.

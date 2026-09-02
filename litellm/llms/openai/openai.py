@@ -1371,6 +1371,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         max_retries=None,
         organization: Optional[str] = None,
         headers: Optional[dict] = None,
+        proxy: Optional[str] = None,
     ):
         response = None
         try:
@@ -1382,6 +1383,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 max_retries=max_retries,
                 organization=organization,
                 client=client,
+                proxy=proxy,
             )
 
             if headers:
@@ -1423,6 +1425,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         aimg_generation=None,
         organization: Optional[str] = None,
         headers: Optional[dict] = None,
+        proxy: Optional[str] = None,
     ) -> ImageResponse:
         data = {}
         try:
@@ -1444,6 +1447,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     max_retries=max_retries,
                     organization=organization,
                     headers=headers,
+                    proxy=proxy,
                 )  # type: ignore
 
             openai_client: OpenAI = self._get_openai_client(  # type: ignore
@@ -1454,6 +1458,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 max_retries=max_retries,
                 organization=organization,
                 client=client,
+                proxy=proxy,
             )
 
             ## LOGGING
@@ -1624,21 +1629,26 @@ class OpenAIFilesAPI(BaseLLM):
         organization: Optional[str],
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
         _is_async: bool = False,
+        proxy: Optional[str] = None,
     ) -> Optional[Union[OpenAI, AsyncOpenAI]]:
         received_args = locals()
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = None
         if client is None:
             data = {}
             for k, v in received_args.items():
-                if k == "self" or k == "client" or k == "_is_async":
+                if k == "self" or k == "client" or k == "_is_async" or k == "proxy":
                     pass
                 elif k == "api_base" and v is not None:
                     data["base_url"] = v
                 elif v is not None:
                     data[k] = v
             if _is_async is True:
+                if proxy is not None:
+                    data["http_client"] = OpenAIChatCompletion._get_async_http_client(proxy=proxy)
                 openai_client = AsyncOpenAI(**data)
             else:
+                if proxy is not None:
+                    data["http_client"] = OpenAIChatCompletion._get_sync_http_client(proxy=proxy)
                 openai_client = OpenAI(**data)  # type: ignore
         else:
             openai_client = client
@@ -1663,6 +1673,7 @@ class OpenAIFilesAPI(BaseLLM):
         max_retries: Optional[int],
         organization: Optional[str],
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ) -> Union[OpenAIFileObject, Coroutine[Any, Any, OpenAIFileObject]]:
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1672,6 +1683,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(
@@ -1707,6 +1719,7 @@ class OpenAIFilesAPI(BaseLLM):
         max_retries: Optional[int],
         organization: Optional[str],
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ) -> Union[HttpxBinaryResponseContent, Coroutine[Any, Any, HttpxBinaryResponseContent]]:
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1716,6 +1729,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(
@@ -1772,6 +1786,7 @@ class OpenAIFilesAPI(BaseLLM):
         organization: Optional[str],
         chunk_size: int = 1024 * 1024,
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ) -> FileContentStreamingResult:
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1781,6 +1796,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(
@@ -1835,6 +1851,7 @@ class OpenAIFilesAPI(BaseLLM):
         max_retries: Optional[int],
         organization: Optional[str],
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ):
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1844,6 +1861,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(
@@ -1881,6 +1899,7 @@ class OpenAIFilesAPI(BaseLLM):
         max_retries: Optional[int],
         organization: Optional[str],
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ):
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1890,6 +1909,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(
@@ -1930,6 +1950,7 @@ class OpenAIFilesAPI(BaseLLM):
         organization: Optional[str],
         purpose: Optional[str] = None,
         client: Optional[Union[OpenAI, AsyncOpenAI]] = None,
+        proxy: Optional[str] = None,
     ):
         openai_client: Optional[Union[OpenAI, AsyncOpenAI]] = self.get_openai_client(
             api_key=api_key,
@@ -1939,6 +1960,7 @@ class OpenAIFilesAPI(BaseLLM):
             organization=organization,
             client=client,
             _is_async=_is_async,
+            proxy=proxy,
         )
         if openai_client is None:
             raise ValueError(

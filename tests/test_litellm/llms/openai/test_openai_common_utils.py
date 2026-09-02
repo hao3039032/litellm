@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -8,8 +8,9 @@ sys.path.insert(0, os.path.abspath("../../.."))  # Adds the parent directory to 
 
 import litellm
 from litellm.llms.openai.common_utils import BaseOpenAILLM
-from litellm.llms.openai.openai import OpenAIChatCompletion, OpenAIError
-from litellm.types.utils import EmbeddingResponse
+from litellm.llms.openai.openai import OpenAIChatCompletion, OpenAIError, OpenAIFilesAPI
+from litellm.types.llms.openai import OpenAIFileObject
+from litellm.types.utils import EmbeddingResponse, ImageResponse
 
 # Test parameters for different API functions
 API_FUNCTION_PARAMS = [
@@ -412,3 +413,134 @@ async def test_async_openai_audio_transcription_uses_model_proxy():
         )
 
     assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+def test_image_generation_passes_proxy_to_openai_handler():
+    proxy = "http://127.0.0.1:8080"
+    response = ImageResponse()
+
+    with patch.object(OpenAIChatCompletion, "image_generation", return_value=response) as image_generation:
+        result = litellm.image_generation(
+            model="openai/dall-e-3",
+            prompt="a lighthouse",
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert result is response
+    assert image_generation.call_args.kwargs["proxy"] == proxy
+
+
+def test_openai_image_generation_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(OpenAIError, match="stop"),
+    ):
+        openai_handler.image_generation(
+            model="dall-e-3",
+            prompt="a lighthouse",
+            timeout=30,
+            optional_params={},
+            logging_obj=MagicMock(),
+            api_key="sk-test",
+            model_response=ImageResponse(),
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_async_openai_image_generation_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    openai_handler = OpenAIChatCompletion()
+
+    with (
+        patch.object(openai_handler, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError, match="stop"),
+    ):
+        await openai_handler.aimage_generation(
+            prompt="a lighthouse",
+            data={"model": "dall-e-3", "prompt": "a lighthouse"},
+            model_response=ImageResponse(),
+            timeout=30,
+            logging_obj=MagicMock(),
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+def test_moderation_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+
+    with (
+        patch.object(OpenAIChatCompletion, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError, match="stop"),
+    ):
+        litellm.moderation(input="hello", api_key="sk-test", proxy=proxy)
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_async_moderation_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+
+    with (
+        patch.object(OpenAIChatCompletion, "_get_openai_client", side_effect=RuntimeError("stop")) as get_client,
+        pytest.raises(RuntimeError, match="stop"),
+    ):
+        await litellm.amoderation(input="hello", api_key="sk-test", proxy=proxy)
+
+    assert get_client.call_args.kwargs["proxy"] == proxy
+
+
+def test_openai_files_client_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+    files_handler = OpenAIFilesAPI()
+
+    with (
+        patch.object(OpenAIChatCompletion, "_get_sync_http_client") as get_http_client,
+        patch("litellm.llms.openai.openai.OpenAI") as openai_client,
+    ):
+        files_handler.get_openai_client(
+            api_key="sk-test",
+            api_base="https://api.openai.com/v1",
+            timeout=30,
+            max_retries=2,
+            organization=None,
+            proxy=proxy,
+        )
+
+    get_http_client.assert_called_once_with(proxy=proxy)
+    assert openai_client.call_args.kwargs["http_client"] is get_http_client.return_value
+
+
+def test_create_file_passes_proxy_to_openai_files_handler():
+    proxy = "http://127.0.0.1:8080"
+    response = OpenAIFileObject(
+        id="file-1",
+        bytes=3,
+        created_at=0,
+        filename="batch.jsonl",
+        object="file",
+        purpose="batch",
+        status="uploaded",
+    )
+
+    with patch("litellm.files.main.openai_files_instance.create_file", return_value=response) as create_file:
+        result = litellm.create_file(
+            file=b"{}\n",
+            purpose="batch",
+            custom_llm_provider="openai",
+            api_key="sk-test",
+            proxy=proxy,
+        )
+
+    assert result == response
+    assert create_file.call_args.kwargs["proxy"] == proxy

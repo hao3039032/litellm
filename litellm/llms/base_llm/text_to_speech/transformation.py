@@ -131,6 +131,7 @@ class BaseTextToSpeechConfig(ABC):
         model: str,
         raw_response: httpx.Response,
         logging_obj: LiteLLMLoggingObj,
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Transform provider response to standard format

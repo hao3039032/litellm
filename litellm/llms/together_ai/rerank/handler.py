@@ -10,6 +10,7 @@ import litellm
 from litellm.llms.base import BaseLLM
 from litellm.llms.custom_httpx.http_handler import (
     _get_httpx_client,
+    build_httpx_handler_params,
     get_async_httpx_client,
 )
 from litellm.llms.together_ai.rerank.transformation import TogetherAIRerankConfig
@@ -28,9 +29,8 @@ class TogetherAIRerank(BaseLLM):
         return_documents: Optional[bool] = True,
         max_chunks_per_doc: Optional[int] = None,
         _is_async: Optional[bool] = False,
+        litellm_params: Optional[dict[str, Any]] = None,
     ) -> RerankResponse:
-        client = _get_httpx_client()
-
         request_data = RerankRequest(
             model=model,
             query=query,
@@ -46,7 +46,9 @@ class TogetherAIRerank(BaseLLM):
             raise ValueError("TogetherAI does not support max_chunks_per_doc")
 
         if _is_async:
-            return self.async_rerank(request_data_dict, api_key)  # type: ignore # Call async method
+            return self.async_rerank(request_data_dict, api_key, litellm_params)  # type: ignore
+
+        client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
 
         response = client.post(
             "https://api.together.xyz/v1/rerank",
@@ -69,8 +71,12 @@ class TogetherAIRerank(BaseLLM):
         self,
         request_data_dict: Dict[str, Any],
         api_key: str,
+        litellm_params: Optional[dict[str, Any]] = None,
     ) -> RerankResponse:
-        client = get_async_httpx_client(llm_provider=litellm.LlmProviders.TOGETHER_AI)  # Use async client
+        client = get_async_httpx_client(
+            llm_provider=litellm.LlmProviders.TOGETHER_AI,
+            params=build_httpx_handler_params(litellm_params),
+        )
 
         response = await client.post(
             "https://api.together.xyz/v1/rerank",

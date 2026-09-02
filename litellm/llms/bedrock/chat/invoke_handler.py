@@ -42,6 +42,7 @@ from litellm.llms.custom_httpx.http_handler import (
     AsyncHTTPHandler,
     HTTPHandler,
     _get_httpx_client,
+    build_httpx_handler_params,
     get_async_httpx_client,
 )
 from litellm.types.llms.bedrock import *
@@ -195,16 +196,21 @@ async def make_call(
     json_mode: Optional[bool] = False,
     bedrock_invoke_provider: Optional[litellm.BEDROCK_INVOKE_PROVIDERS_LITERAL] = None,
     stream_chunk_size: Optional[int] = None,
+    litellm_params: Optional[dict] = None,
 ):
     try:
         if client is None:
+            client_params = build_httpx_handler_params(litellm_params)
+            if (
+                client_params["ssl_verify"] is None
+                and logging_obj
+                and logging_obj.litellm_params
+                and logging_obj.litellm_params.get("ssl_verify")
+            ):
+                client_params["ssl_verify"] = logging_obj.litellm_params["ssl_verify"]
             client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders.BEDROCK,
-                params=(
-                    {"ssl_verify": logging_obj.litellm_params.get("ssl_verify")}
-                    if logging_obj and logging_obj.litellm_params and logging_obj.litellm_params.get("ssl_verify")
-                    else None
-                ),
+                params=client_params,
             )  # Create a new client if none provided
 
         response = await client.post(
@@ -1001,7 +1007,7 @@ class BedrockLLM(BaseAWSLLM):
             )  # type: ignore
 
         if client is None or isinstance(client, AsyncHTTPHandler):
-            _params = {}
+            _params = build_httpx_handler_params(litellm_params)
             if timeout is not None:
                 if isinstance(timeout, float) or isinstance(timeout, int):
                     timeout = httpx.Timeout(timeout)
@@ -1176,7 +1182,7 @@ class BedrockLLM(BaseAWSLLM):
         client: Optional[AsyncHTTPHandler] = None,
     ) -> Union[ModelResponse, CustomStreamWrapper]:
         if client is None:
-            _params = {}
+            _params = build_httpx_handler_params(litellm_params)
             if timeout is not None:
                 if isinstance(timeout, float) or isinstance(timeout, int):
                     timeout = httpx.Timeout(timeout)
@@ -1249,6 +1255,7 @@ class BedrockLLM(BaseAWSLLM):
                 logging_obj=logging_obj,
                 fake_stream=True if "ai21" in api_base else False,
                 stream_chunk_size=stream_chunk_size,
+                litellm_params=litellm_params,
             ),
             model=model,
             custom_llm_provider="bedrock",

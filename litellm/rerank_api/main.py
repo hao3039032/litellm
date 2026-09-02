@@ -287,6 +287,7 @@ def rerank(
                 max_chunks_per_doc=max_chunks_per_doc,
                 api_key=api_key,
                 _is_async=_is_async,
+                litellm_params=rerank_litellm_params,
             )
         elif _custom_llm_provider == litellm.LlmProviders.JINA_AI:
             if dynamic_api_key is None:

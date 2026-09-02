@@ -261,6 +261,7 @@ class OpenAIVideoConfig(BaseVideoConfig):
         self,
         raw_response: httpx.Response,
         logging_obj: LiteLLMLoggingObj,
+        litellm_params: Optional[GenericLiteLLMParams] = None,
     ) -> bytes:
         """Transform the OpenAI video content download response."""
         return raw_response.content

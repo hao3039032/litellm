@@ -20,6 +20,7 @@ from litellm.llms.base_llm.text_to_speech.transformation import (
     BaseTextToSpeechConfig,
     TextToSpeechRequestData,
 )
+from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params
 from litellm.secret_managers.main import get_secret_str
 
 if TYPE_CHECKING:
@@ -279,6 +280,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         api_base: str,
         headers: Dict[str, str],
         timeout_secs: float = 600,
+        litellm_params: Optional[dict] = None,
     ) -> httpx.Response:
         """
         Poll RunwayML task until completion (sync).
@@ -297,7 +299,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         """
         from litellm.llms.custom_httpx.http_handler import _get_httpx_client
 
-        client = _get_httpx_client()
+        client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
         start_time = time.time()
 
         # Build task status URL
@@ -330,6 +332,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         api_base: str,
         headers: Dict[str, str],
         timeout_secs: float = 600,
+        litellm_params: Optional[dict] = None,
     ) -> httpx.Response:
         """
         Poll RunwayML task until completion (async).
@@ -345,7 +348,10 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         """
         from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
 
-        client = get_async_httpx_client(llm_provider=litellm.LlmProviders.RUNWAYML)
+        client = get_async_httpx_client(
+            llm_provider=litellm.LlmProviders.RUNWAYML,
+            params=build_httpx_handler_params(litellm_params),
+        )
         start_time = time.time()
 
         # Build task status URL
@@ -427,6 +433,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         model: str,
         raw_response: httpx.Response,
         logging_obj: "LiteLLMLoggingObj",
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Transform RunwayML TTS response to standard format
@@ -479,6 +486,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
             api_base=self.DEFAULT_BASE_URL,
             headers=poll_headers,
             timeout_secs=RUNWAYML_POLLING_TIMEOUT,
+            litellm_params=litellm_params,
         )
 
         # Get the completed task data
@@ -498,7 +506,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         # Download the audio file
         from litellm.llms.custom_httpx.http_handler import _get_httpx_client
 
-        client = _get_httpx_client()
+        client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
         audio_response = client.get(url=audio_url)
         audio_response.raise_for_status()
 
@@ -512,6 +520,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         model: str,
         raw_response: httpx.Response,
         logging_obj: "LiteLLMLoggingObj",
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Async transform RunwayML TTS response to standard format
@@ -548,6 +557,7 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
             api_base=self.DEFAULT_BASE_URL,
             headers=poll_headers,
             timeout_secs=RUNWAYML_POLLING_TIMEOUT,
+            litellm_params=litellm_params,
         )
 
         # Get the completed task data
@@ -567,7 +577,10 @@ class RunwayMLTextToSpeechConfig(BaseTextToSpeechConfig):
         # Download the audio file (async)
         from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
 
-        client = get_async_httpx_client(llm_provider=litellm.LlmProviders.RUNWAYML)
+        client = get_async_httpx_client(
+            llm_provider=litellm.LlmProviders.RUNWAYML,
+            params=build_httpx_handler_params(litellm_params),
+        )
         audio_response = await client.get(url=audio_url)
         audio_response.raise_for_status()
 

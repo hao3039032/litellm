@@ -12,6 +12,7 @@ from litellm.constants import (
 from litellm.llms.base_llm.image_generation.transformation import (
     BaseImageGenerationConfig,
 )
+from litellm.llms.custom_httpx.http_handler import build_httpx_handler_params
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import (
     AllMessageValues,
@@ -191,6 +192,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         api_base: str,
         headers: Dict[str, str],
         timeout_secs: float = 600,
+        litellm_params: Optional[dict] = None,
     ) -> httpx.Response:
         """
         Poll RunwayML task until completion (sync).
@@ -209,7 +211,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         """
         from litellm.llms.custom_httpx.http_handler import _get_httpx_client
 
-        client = _get_httpx_client()
+        client = _get_httpx_client(params=build_httpx_handler_params(litellm_params))
         start_time = time.time()
 
         # Build task status URL
@@ -242,6 +244,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         api_base: str,
         headers: Dict[str, str],
         timeout_secs: float = 600,
+        litellm_params: Optional[dict] = None,
     ) -> httpx.Response:
         """
         Poll RunwayML task until completion (async).
@@ -258,7 +261,10 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         import litellm
         from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
 
-        client = get_async_httpx_client(llm_provider=litellm.LlmProviders.RUNWAYML)
+        client = get_async_httpx_client(
+            llm_provider=litellm.LlmProviders.RUNWAYML,
+            params=build_httpx_handler_params(litellm_params),
+        )
         start_time = time.time()
 
         # Build task status URL
@@ -347,6 +353,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
             api_base=self.DEFAULT_BASE_URL,
             headers=poll_headers,
             timeout_secs=RUNWAYML_POLLING_TIMEOUT,
+            litellm_params=litellm_params,
         )
 
         # Update response_data with polled result
@@ -407,6 +414,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
             api_base=self.DEFAULT_BASE_URL,
             headers=poll_headers,
             timeout_secs=RUNWAYML_POLLING_TIMEOUT,
+            litellm_params=litellm_params,
         )
 
         # Update response_data with polled result

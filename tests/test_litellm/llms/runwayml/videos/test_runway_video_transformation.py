@@ -2,7 +2,7 @@
 Tests for RunwayML video generation transformation.
 """
 
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 import pytest
@@ -54,9 +54,7 @@ class TestRunwayMLVideoTransformation:
         from litellm.types.videos.utils import encode_video_id_with_provider
 
         # Test status request URL construction
-        video_id = encode_video_id_with_provider(
-            "63fd0f13-f29d-4e58-99d3-1cb9efa14a5b", "runwayml", "gen4_turbo"
-        )
+        video_id = encode_video_id_with_provider("63fd0f13-f29d-4e58-99d3-1cb9efa14a5b", "runwayml", "gen4_turbo")
         api_base = "https://api.dev.runwayml.com/v1"
 
         url, params = self.config.transform_video_status_retrieve_request(
@@ -66,10 +64,7 @@ class TestRunwayMLVideoTransformation:
             headers={},
         )
 
-        assert (
-            url
-            == "https://api.dev.runwayml.com/v1/tasks/63fd0f13-f29d-4e58-99d3-1cb9efa14a5b"
-        )
+        assert url == "https://api.dev.runwayml.com/v1/tasks/63fd0f13-f29d-4e58-99d3-1cb9efa14a5b"
         assert params == {}
 
         # Test status response with ISO 8601 timestamp parsing
@@ -103,9 +98,7 @@ class TestRunwayMLVideoTransformation:
         from litellm.types.videos.utils import encode_video_id_with_provider
 
         # Test content request URL
-        video_id = encode_video_id_with_provider(
-            "63fd0f13-f29d-4e58-99d3-1cb9efa14a5b", "runwayml", "gen4_turbo"
-        )
+        video_id = encode_video_id_with_provider("63fd0f13-f29d-4e58-99d3-1cb9efa14a5b", "runwayml", "gen4_turbo")
         api_base = "https://api.dev.runwayml.com/v1"
 
         url, params = self.config.transform_video_content_request(
@@ -115,10 +108,7 @@ class TestRunwayMLVideoTransformation:
             headers={},
         )
 
-        assert (
-            url
-            == "https://api.dev.runwayml.com/v1/tasks/63fd0f13-f29d-4e58-99d3-1cb9efa14a5b"
-        )
+        assert url == "https://api.dev.runwayml.com/v1/tasks/63fd0f13-f29d-4e58-99d3-1cb9efa14a5b"
 
         # Test video URL extraction from response
         response_data = {
@@ -134,6 +124,38 @@ class TestRunwayMLVideoTransformation:
         with pytest.raises(ValueError, match="still processing"):
             self.config._extract_video_url_from_response(processing_response)
 
+    def test_transform_video_content_uses_model_proxy(self):
+        proxy = "http://127.0.0.1:8080"
+        raw_response = httpx.Response(
+            200,
+            json={
+                "id": "test-id",
+                "status": "SUCCEEDED",
+                "output": ["https://example.com/video.mp4"],
+            },
+            request=httpx.Request("GET", "https://api.dev.runwayml.com/v1/tasks/test-id"),
+        )
+        video_response = httpx.Response(
+            200,
+            content=b"video",
+            request=httpx.Request("GET", "https://example.com/video.mp4"),
+        )
+        client = MagicMock()
+        client.get.return_value = video_response
+
+        with patch(
+            "litellm.llms.runwayml.videos.transformation._get_httpx_client",
+            return_value=client,
+        ) as get_client:
+            result = self.config.transform_video_content_response(
+                raw_response=raw_response,
+                logging_obj=self.mock_logging_obj,
+                litellm_params=GenericLiteLLMParams(proxy=proxy),
+            )
+
+        assert result == b"video"
+        assert get_client.call_args.kwargs["params"]["proxy"] == proxy
+
     def test_transform_video_status_encodes_video_id_path_segment(self):
         """Test task IDs are encoded before being appended to Runway URLs."""
         url, params = self.config.transform_video_status_retrieve_request(
@@ -143,10 +165,7 @@ class TestRunwayMLVideoTransformation:
             headers={},
         )
 
-        assert (
-            url
-            == "https://api.dev.runwayml.com/v1/tasks/..%2F..%2Ftasks%2Fother%3Fx%3D1%23frag"
-        )
+        assert url == "https://api.dev.runwayml.com/v1/tasks/..%2F..%2Ftasks%2Fother%3Fx%3D1%23frag"
         assert params == {}
 
     def test_full_video_workflow(self):

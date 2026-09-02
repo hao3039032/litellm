@@ -278,6 +278,7 @@ class MinimaxTextToSpeechConfig(BaseTextToSpeechConfig):
         model: str,
         raw_response: httpx.Response,
         logging_obj: LiteLLMLoggingObj,
+        litellm_params: Optional[dict] = None,
     ) -> "HttpxBinaryResponseContent":
         """
         Transform MiniMax response to standard format.

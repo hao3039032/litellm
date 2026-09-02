@@ -136,6 +136,7 @@ class BaseVideoConfig(ABC):
         self,
         raw_response: httpx.Response,
         logging_obj: LiteLLMLoggingObj,
+        litellm_params: Optional[GenericLiteLLMParams] = None,
     ) -> bytes:
         pass
 
@@ -143,6 +144,7 @@ class BaseVideoConfig(ABC):
         self,
         raw_response: httpx.Response,
         logging_obj: LiteLLMLoggingObj,
+        litellm_params: Optional[GenericLiteLLMParams] = None,
     ) -> bytes:
         """
         Async transform video content download response to bytes.
@@ -162,6 +164,7 @@ class BaseVideoConfig(ABC):
         return self.transform_video_content_response(
             raw_response=raw_response,
             logging_obj=logging_obj,
+            litellm_params=litellm_params,
         )
 
     @abstractmethod

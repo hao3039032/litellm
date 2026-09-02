@@ -7372,16 +7372,18 @@ def moderation(
 ) -> OpenAIModerationResponse:
     # only supports open ai for now
     api_key = api_key or litellm.api_key or litellm.openai_key or get_secret_str("OPENAI_API_KEY")
-
-    # Extract api_base from kwargs
-    api_base = kwargs.get("api_base", None)
+    optional_params = GenericLiteLLMParams(**kwargs)
 
     openai_client = kwargs.get("client", None)
     if openai_client is None:
-        if api_base is not None:
-            openai_client = openai.OpenAI(api_key=api_key, base_url=api_base)
-        else:
-            openai_client = openai.OpenAI(api_key=api_key)
+        openai_client = openai_chat_completions._get_openai_client(
+            is_async=False,
+            api_key=api_key,
+            api_base=optional_params.api_base,
+            proxy=optional_params.proxy,
+        )
+    if openai_client is None:
+        raise ValueError("OpenAI client is not initialized")
 
     if model is not None:
         response = openai_client.moderations.create(input=input, model=model)
@@ -7433,6 +7435,7 @@ async def amoderation(
             is_async=True,
             api_key=api_key,
             api_base=optional_params.api_base or _dynamic_api_base,
+            proxy=optional_params.proxy,
         )
     else:
         _openai_client = openai_client

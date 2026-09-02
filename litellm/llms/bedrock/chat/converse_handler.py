@@ -12,6 +12,7 @@ from litellm.llms.custom_httpx.http_handler import (
     AsyncHTTPHandler,
     HTTPHandler,
     _get_httpx_client,
+    build_httpx_handler_params,
     get_async_httpx_client,
 )
 from litellm.types.utils import ModelResponse
@@ -143,6 +144,7 @@ class BedrockConverseLLM(BaseAWSLLM):
             fake_stream=fake_stream,
             json_mode=json_mode,
             stream_chunk_size=stream_chunk_size,
+            litellm_params=litellm_params,
         )
         streaming_response = CustomStreamWrapper(
             completion_stream=completion_stream,
@@ -202,7 +204,7 @@ class BedrockConverseLLM(BaseAWSLLM):
 
         headers = dict(prepped.headers)
         if client is None or not isinstance(client, AsyncHTTPHandler):
-            _params = {}
+            _params = build_httpx_handler_params(litellm_params)
             if timeout is not None:
                 if isinstance(timeout, float) or isinstance(timeout, int):
                     timeout = httpx.Timeout(timeout)
@@ -430,7 +432,7 @@ class BedrockConverseLLM(BaseAWSLLM):
             },
         )
         if client is None or isinstance(client, AsyncHTTPHandler):
-            _params = {}
+            _params = build_httpx_handler_params(litellm_params)
             if timeout is not None:
                 if isinstance(timeout, float) or isinstance(timeout, int):
                     timeout = httpx.Timeout(timeout)

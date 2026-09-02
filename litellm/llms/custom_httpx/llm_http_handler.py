@@ -557,6 +557,10 @@ class BaseLLMHTTPHandler:
                 fake_stream=fake_stream,
             )
             if provider_config.has_custom_stream_wrapper is True:
+                if client is None or not isinstance(client, HTTPHandler):
+                    client = _get_httpx_client(
+                        params=build_httpx_handler_params(litellm_params),
+                    )
                 return provider_config.get_sync_custom_stream_wrapper(
                     model=model,
                     custom_llm_provider=custom_llm_provider,
@@ -717,6 +721,11 @@ class BaseLLMHTTPHandler:
         signed_json_body: Optional[bytes] = None,
     ):
         if provider_config.has_custom_stream_wrapper is True:
+            if client is None:
+                client = get_async_httpx_client(
+                    llm_provider=litellm.LlmProviders(custom_llm_provider),
+                    params=build_httpx_handler_params(litellm_params),
+                )
             return await provider_config.get_async_custom_stream_wrapper(
                 model=model,
                 custom_llm_provider=custom_llm_provider,
@@ -7067,6 +7076,7 @@ class BaseLLMHTTPHandler:
             return video_content_provider_config.transform_video_content_response(
                 raw_response=response,
                 logging_obj=logging_obj,
+                litellm_params=litellm_params,
             )
 
         except Exception as e:
@@ -7145,6 +7155,7 @@ class BaseLLMHTTPHandler:
             return await video_content_provider_config.async_transform_video_content_response(
                 raw_response=response,
                 logging_obj=logging_obj,
+                litellm_params=litellm_params,
             )
 
         except Exception as e:
@@ -11422,6 +11433,7 @@ class BaseLLMHTTPHandler:
             model=model,
             raw_response=response,
             logging_obj=logging_obj,
+            litellm_params=litellm_params,
         )
 
     async def async_text_to_speech_handler(
@@ -11521,6 +11533,7 @@ class BaseLLMHTTPHandler:
             model=model,
             raw_response=response,
             logging_obj=logging_obj,
+            litellm_params=litellm_params,
         )
 
     #########################################################

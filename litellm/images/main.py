@@ -488,6 +488,7 @@ def image_generation(
                 aimg_generation=aimg_generation,
                 client=client,
                 headers=headers,
+                proxy=litellm_params_dict.get("proxy"),
             )
         elif custom_llm_provider == "bedrock":
             if model is None:

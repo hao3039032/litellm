@@ -1,12 +1,10 @@
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-sys.path.insert(
-    0, os.path.abspath("../../../../..")
-)  # Adds the parent directory to the system path
+sys.path.insert(0, os.path.abspath("../../../../.."))  # Adds the parent directory to the system path
 
 import litellm
 from litellm.llms.bedrock.chat.invoke_handler import (
@@ -206,9 +204,7 @@ def test_bedrock_converse_streaming_consistent_id():
     expected_id = f"chatcmpl-{native_conversation_id}"
 
     for response in parsed_responses:
-        assert (
-            response.id == expected_id
-        ), "All chunk IDs must match the one captured from the messageStart event"
+        assert response.id == expected_id, "All chunk IDs must match the one captured from the messageStart event"
 
 
 @pytest.mark.asyncio
@@ -254,6 +250,35 @@ async def test_make_call_honors_explicit_stream_chunk_size():
     )
 
     response.aiter_bytes.assert_called_once_with(chunk_size=2048)
+
+
+@pytest.mark.asyncio
+async def test_legacy_bedrock_async_completion_uses_model_proxy():
+    proxy = "http://127.0.0.1:8080"
+
+    with (
+        patch(
+            "litellm.llms.bedrock.chat.invoke_handler.get_async_httpx_client",
+            side_effect=RuntimeError("stop"),
+        ) as get_client,
+        pytest.raises(RuntimeError, match="stop"),
+    ):
+        await BedrockLLM().async_completion(
+            model="anthropic.claude-3-sonnet-v1:0",
+            messages=[{"role": "user", "content": "hello"}],
+            api_base="https://bedrock-runtime.us-east-1.amazonaws.com/model/test/invoke",
+            model_response=litellm.ModelResponse(),
+            print_verbose=MagicMock(),
+            data="{}",
+            timeout=None,
+            encoding=litellm.encoding,
+            logging_obj=MagicMock(),
+            stream=False,
+            optional_params={},
+            litellm_params={"proxy": proxy},
+        )
+
+    assert get_client.call_args.kwargs["params"]["proxy"] == proxy
 
 
 def test_make_sync_call_does_not_rechunk_stream_by_default():

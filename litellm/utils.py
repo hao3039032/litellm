@@ -7874,6 +7874,14 @@ class ProviderConfigManager:
             LlmProviders.XAI: (lambda: litellm.XAIChatConfig(), False),
             LlmProviders.ZAI: (lambda: litellm.ZAIChatConfig(), False),
             LlmProviders.LAMBDA_AI: (lambda: litellm.LambdaAIChatConfig(), False),
+            LlmProviders.OPENCODE: (
+                lambda model: ProviderConfigManager._get_opencode_config(model, LlmProviders.OPENCODE),
+                True,
+            ),
+            LlmProviders.OPENCODE_GO: (
+                lambda model: ProviderConfigManager._get_opencode_config(model, LlmProviders.OPENCODE_GO),
+                True,
+            ),
             LlmProviders.INCEPTION: (lambda: litellm.InceptionChatConfig(), False),
             LlmProviders.LLAMA: (lambda: litellm.LlamaAPIConfig(), False),
             LlmProviders.TEXT_COMPLETION_OPENAI: (
@@ -8045,6 +8053,19 @@ class ProviderConfigManager:
         from litellm.llms.bedrock.common_utils import get_bedrock_chat_config
 
         return get_bedrock_chat_config(model=model)
+
+    @staticmethod
+    def _get_opencode_config(model: str, provider: LlmProviders) -> BaseConfig:
+        """Pick the wire format OpenCode serves this model on."""
+        from litellm.llms.opencode.common_utils import opencode_endpoint_for_model
+
+        is_go: Final = provider is LlmProviders.OPENCODE_GO
+        endpoint: Final = opencode_endpoint_for_model(provider.value, model)
+        if endpoint == "/v1/messages":
+            return litellm.OpenCodeGoMessagesChatConfig() if is_go else litellm.OpenCodeZenMessagesChatConfig()
+        if endpoint == "/v1/models:generateContent" and not is_go:
+            return litellm.OpenCodeZenGeminiChatConfig()
+        return litellm.OpenCodeGoChatConfig() if is_go else litellm.OpenCodeZenChatConfig()
 
     @staticmethod
     def _get_cohere_config(model: str) -> BaseConfig:
@@ -8269,6 +8290,13 @@ class ProviderConfigManager:
         model_lower: Final = model.lower()
         if litellm.LlmProviders.ANTHROPIC == provider:
             return litellm.AnthropicMessagesConfig()
+        elif provider in (LlmProviders.OPENCODE, LlmProviders.OPENCODE_GO):
+            from litellm.llms.opencode.common_utils import opencode_endpoint_for_model
+            from litellm.llms.opencode.messages.transformation import OpenCodeMessagesConfig
+
+            if opencode_endpoint_for_model(provider.value, model) == "/v1/messages":
+                return OpenCodeMessagesConfig(provider.value)
+            return None
         # The 'BEDROCK' provider corresponds to Amazon's implementation of Anthropic Claude v3.
         # This mapping ensures that the correct configuration is returned for BEDROCK.
         elif litellm.LlmProviders.BEDROCK == provider:
@@ -8468,6 +8496,16 @@ class ProviderConfigManager:
                 return litellm.AzureOpenAIResponsesAPIConfig()
         elif litellm.LlmProviders.XAI == provider:
             return litellm.XAIResponsesAPIConfig()
+        elif provider in (LlmProviders.OPENCODE, LlmProviders.OPENCODE_GO):
+            from litellm.llms.opencode.common_utils import opencode_endpoint_for_model
+
+            if model is not None and opencode_endpoint_for_model(provider.value, model) != "/v1/responses":
+                return None
+            return (
+                litellm.OpenCodeGoResponsesAPIConfig()
+                if provider is LlmProviders.OPENCODE_GO
+                else litellm.OpenCodeZenResponsesAPIConfig()
+            )
         elif litellm.LlmProviders.GITHUB_COPILOT == provider:
             from litellm.llms.github_copilot.responses.transformation import (
                 github_copilot_supports_responses_api,

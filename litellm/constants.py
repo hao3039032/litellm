@@ -610,6 +610,8 @@ LITELLM_CHAT_PROVIDERS: Final = [
     "oci",
     "morph",
     "lambda_ai",
+    "opencode",
+    "opencode_go",
     "inception",
     "vercel_ai_gateway",
     "wandb",
@@ -784,6 +786,8 @@ openai_compatible_endpoints: Final[list] = [
     "https://api.meta.ai/v1",
     "https://api.cognition.ai/v1",
     "https://api.scx.ai/v1",
+    "https://opencode.ai/zen/go/v1",
+    "https://opencode.ai/zen/v1",
 ]
 
 
@@ -839,6 +843,8 @@ openai_compatible_providers: Final[list] = [
     "helicone",
     "morph",
     "lambda_ai",
+    "opencode",
+    "opencode_go",
     "inception",
     "hyperbolic",
     "vercel_ai_gateway",

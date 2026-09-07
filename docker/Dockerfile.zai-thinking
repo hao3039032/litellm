@@ -8,6 +8,9 @@
 #   5) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
 FROM ghcr.io/berriai/litellm-database:v1.99.1
 
+RUN /app/.venv/bin/python -m ensurepip \
+    && /app/.venv/bin/python -m pip install --no-cache-dir socksio==1.0.0 aiohttp-socks==0.12.0
+
 # Patch 1: zai provider transformation (reasoning -> extra_body routing)
 COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
 
@@ -21,10 +24,19 @@ COPY litellm/proxy/public_endpoints/provider_create_fields.json /app/.venv/lib/p
 COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py
 COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/litellm_pre_call_utils.py
 
+COPY litellm/_lazy_imports_registry.py /app/.venv/lib/python3.13/site-packages/litellm/_lazy_imports_registry.py
+COPY litellm/constants.py /app/.venv/lib/python3.13/site-packages/litellm/constants.py
+COPY litellm/litellm_core_utils/get_llm_provider_logic.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/get_llm_provider_logic.py
+COPY litellm/main.py /app/.venv/lib/python3.13/site-packages/litellm/main.py
+COPY litellm/provider_endpoints_support_backup.json /app/.venv/lib/python3.13/site-packages/litellm/provider_endpoints_support_backup.json
+COPY litellm/types/utils.py /app/.venv/lib/python3.13/site-packages/litellm/types/utils.py
+COPY litellm/utils.py /app/.venv/lib/python3.13/site-packages/litellm/utils.py
+COPY litellm/llms/opencode /app/.venv/lib/python3.13/site-packages/litellm/llms/opencode
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.99.1"

@@ -37,11 +37,13 @@ Safe to enable globally:
 """
 
 import time
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final, Optional, cast
 
 import httpx
 
 from litellm._logging import verbose_router_logger
+from litellm.constants import EMPTY_MAPPING
 from litellm.exceptions import (
     BadRequestError,
     RateLimitError,
@@ -51,7 +53,7 @@ from litellm.integrations.custom_logger import CustomLogger, Span
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.responses.utils import ResponsesAPIRequestUtils
 from litellm.router_utils.cooldown_cache import CooldownCacheValue
-from litellm.types.llms.openai import AllMessageValues
+from litellm.types.llms.openai import AllMessageValues, ResponseInputParam
 
 if TYPE_CHECKING:
     from litellm.router import Router
@@ -189,7 +191,7 @@ class EncryptedContentAffinityCheck(CustomLogger):
         resolved: Final = (
             CredentialAccessor.get_credential_values(credential_name)
             if isinstance(credential_name, str) and credential_name and (not inline_api_base or not inline_api_key)
-            else {}
+            else EMPTY_MAPPING
         )
         api_base: Final = inline_api_base or resolved.get("api_base")
         api_key: Final = inline_api_key or resolved.get("api_key")
@@ -229,29 +231,36 @@ class EncryptedContentAffinityCheck(CustomLogger):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _drop_stale_encrypted_items(request_input: Any) -> Any:
+    def _drop_stale_encrypted_items(request_input: str | ResponseInputParam) -> str | ResponseInputParam:
         """
         Return ``request_input`` with items carrying litellm-encoded
         encrypted-content markers removed. Visible history (plain messages,
         function calls, outputs) is preserved; only the encrypted reasoning
         items — now unusable on any available deployment — are dropped.
-        Non-list inputs are returned unchanged (they never carry markers).
+        Non-list inputs are returned unchanged (they never carry markers);
+        the marker check only reads ``id`` / ``encrypted_content``, both
+        optional across every item shape, so the per-item scan treats
+        entries as ``Mapping[str, object]``.
         """
         if not isinstance(request_input, list):
             return request_input
 
-        def _is_stale(item: Any) -> bool:
-            if not isinstance(item, dict):
-                return False
-            item_id = item.get("id")
-            if isinstance(item_id, str) and ResponsesAPIRequestUtils._decode_encrypted_item_id(item_id):
+        def _is_stale(item: Mapping[str, object]) -> bool:
+            item_id: Final = item.get("id")
+            if isinstance(item_id, str) and ResponsesAPIRequestUtils._decode_encrypted_item_id(  # pyright: ignore[reportPrivateUsage] - shared marker codec with the responses pipeline, same calls as _extract_model_id_from_input above
+                item_id
+            ):
                 return True
-            encrypted_content = item.get("encrypted_content")
+            encrypted_content: Final = item.get("encrypted_content")
             return isinstance(encrypted_content, str) and bool(
-                ResponsesAPIRequestUtils._unwrap_encrypted_content_with_model_id(encrypted_content)[0]
+                ResponsesAPIRequestUtils._unwrap_encrypted_content_with_model_id(  # pyright: ignore[reportPrivateUsage] - shared marker codec with the responses pipeline, same calls as _extract_model_id_from_input above
+                    encrypted_content
+                )[0]
             )
 
-        return [item for item in request_input if not _is_stale(item)]
+        return [
+            item for item in request_input if not _is_stale(item)
+        ]  # mutable-ok: request input is rebuilt per request and consumed by the upstream call
 
     async def async_filter_deployments(
         self,
@@ -330,7 +339,10 @@ class EncryptedContentAffinityCheck(CustomLogger):
             return boundary_matches
 
         if self.drop_stale_encrypted_content:
-            request_kwargs["input"] = self._drop_stale_encrypted_items(request_input)
+            # The router reads the mutated request_kwargs["input"] when dispatching
+            # upstream, matching the _encrypted_content_affinity_pinned writes above;
+            # returning a value would silently drop the filtered input.
+            request_kwargs["input"] = self._drop_stale_encrypted_items(request_input)  # rebind-ok: see comment above
             verbose_router_logger.info(
                 "EncryptedContentAffinityCheck: model_id=%s has no encryption-boundary peer in "
                 "model group %s; dropped stale encrypted reasoning items and routing normally",

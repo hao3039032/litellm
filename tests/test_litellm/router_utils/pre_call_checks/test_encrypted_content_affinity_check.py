@@ -1112,7 +1112,7 @@ def credential_store():
     from litellm.models.credentials import CredentialItem
 
     prior: Final[list[object]] = list(litellm.credential_list)
-    litellm.credential_list = [
+    litellm.credential_list = [  # test-quality-ok: fixture-populated credential store; restored on teardown below
         CredentialItem(
             credential_name="creds-jmo",
             credential_info={},
@@ -1125,7 +1125,7 @@ def credential_store():
         ),
     ]
     yield litellm.credential_list
-    litellm.credential_list = prior
+    litellm.credential_list = prior  # test-quality-ok: fixture teardown restoring the global it swapped in above
 
 
 def test_boundary_key_resolves_credential_name(credential_store):

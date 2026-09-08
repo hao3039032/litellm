@@ -6,6 +6,7 @@
 #   3) force local backup usage (1.99.1 fetches the root map remotely by default; that copy lacks zai/glm-5.2)
 #   4) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
 #   5) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
+#   6) encrypted_content affinity: credential-backed encryption boundary + drop_stale_encrypted_content flag
 FROM ghcr.io/berriai/litellm-database:v1.99.1
 
 RUN /app/.venv/bin/python -m ensurepip \
@@ -33,10 +34,14 @@ COPY litellm/types/utils.py /app/.venv/lib/python3.13/site-packages/litellm/type
 COPY litellm/utils.py /app/.venv/lib/python3.13/site-packages/litellm/utils.py
 COPY litellm/llms/opencode /app/.venv/lib/python3.13/site-packages/litellm/llms/opencode
 
+# Patch 6: encrypted_content affinity - credential-backed boundary key + drop_stale_encrypted_content
+COPY litellm/router.py /app/.venv/lib/python3.13/site-packages/litellm/router.py
+COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /app/.venv/lib/python3.13/site-packages/litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing + credential-backed encrypted_content affinity"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.99.1"

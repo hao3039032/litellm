@@ -48,6 +48,7 @@ from litellm.exceptions import (
     ServiceUnavailableError,
 )
 from litellm.integrations.custom_logger import CustomLogger, Span
+from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.responses.utils import ResponsesAPIRequestUtils
 from litellm.router_utils.cooldown_cache import CooldownCacheValue
 from litellm.types.llms.openai import AllMessageValues
@@ -72,11 +73,13 @@ class EncryptedContentAffinityCheck(CustomLogger):
         self,
         router: Optional["Router"] = None,
         enable_global_affinity: bool = True,
+        drop_stale_encrypted_content: bool = False,
         model_group_affinity_config: dict[str, list[str]] | None = None,
     ) -> None:
         super().__init__()
         self.router = router
         self.enable_global_affinity = enable_global_affinity
+        self.drop_stale_encrypted_content = drop_stale_encrypted_content
         self.model_group_affinity_config: dict[str, list[str]] = model_group_affinity_config or {}
 
     # ------------------------------------------------------------------
@@ -152,11 +155,22 @@ class EncryptedContentAffinityCheck(CustomLogger):
     @staticmethod
     def _encryption_boundary_key(
         litellm_params: Any,
-    ) -> tuple | None:
+    ) -> tuple[str, str] | None:
         """
-        ``(api_base, api_key)`` pair identifying an Azure resource. Two
-        deployments sharing both are interchangeable for ``encrypted_content``
-        follow-ups; Azure rejects content produced by any other resource.
+        ``(api_base, api_key)`` pair identifying the upstream org that owns an
+        ``encrypted_content`` blob. Two deployments sharing both are
+        interchangeable for ``encrypted_content`` follow-ups; the upstream
+        rejects content produced by any other org. ``api_key`` alone is a
+        valid boundary when ``api_base`` is unset (first-party
+        OpenAI-style deployments): the key identifies the org on the
+        provider's default base, so two key-only deployments match iff they
+        share the key.
+
+        When inline values are absent, they are resolved from
+        ``litellm_credential_name`` via ``CredentialAccessor`` with the same
+        precedence the request path applies (inline wins), so a
+        credential-backed deployment matches an inline deployment carrying
+        the same underlying credentials.
 
         Accepts any object exposing dict-style ``.get(key, default)``: plain
         dicts (the common case in ``healthy_deployments``) as well as
@@ -169,11 +183,19 @@ class EncryptedContentAffinityCheck(CustomLogger):
         getter: Final = getattr(litellm_params, "get", None)
         if not callable(getter):
             return None
-        api_base: Final = getter("api_base")
-        api_key: Final = getter("api_key")
-        if not api_base or not api_key:
+        inline_api_base: Final = getter("api_base")
+        inline_api_key: Final = getter("api_key")
+        credential_name: Final = getter("litellm_credential_name")
+        resolved: Final = (
+            CredentialAccessor.get_credential_values(credential_name)
+            if isinstance(credential_name, str) and credential_name and (not inline_api_base or not inline_api_key)
+            else {}
+        )
+        api_base: Final = inline_api_base or resolved.get("api_base")
+        api_key: Final = inline_api_key or resolved.get("api_key")
+        if not api_key:
             return None
-        return (api_base, api_key)
+        return (str(api_base or ""), str(api_key))
 
     def _find_deployments_on_same_encryption_boundary(
         self,
@@ -182,8 +204,9 @@ class EncryptedContentAffinityCheck(CustomLogger):
     ) -> tuple[list[dict], Any]:
         """
         Deployments in ``healthy_deployments`` sharing the originating
-        deployment's ``(api_base, api_key)``, alongside the originating
-        deployment object (or ``None`` if it was removed / router unavailable).
+        deployment's encryption boundary (inline ``(api_base, api_key)`` or
+        ``litellm_credential_name``), alongside the originating deployment
+        object (or ``None`` if it was removed / router unavailable).
         Returns ``([], originating_or_None)`` when no boundary match exists,
         so the caller can reuse the looked-up ``originating`` rather than
         re-querying the router.
@@ -205,6 +228,31 @@ class EncryptedContentAffinityCheck(CustomLogger):
     # Request routing  (pre-call filter)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _drop_stale_encrypted_items(request_input: Any) -> Any:
+        """
+        Return ``request_input`` with items carrying litellm-encoded
+        encrypted-content markers removed. Visible history (plain messages,
+        function calls, outputs) is preserved; only the encrypted reasoning
+        items — now unusable on any available deployment — are dropped.
+        Non-list inputs are returned unchanged (they never carry markers).
+        """
+        if not isinstance(request_input, list):
+            return request_input
+
+        def _is_stale(item: Any) -> bool:
+            if not isinstance(item, dict):
+                return False
+            item_id = item.get("id")
+            if isinstance(item_id, str) and ResponsesAPIRequestUtils._decode_encrypted_item_id(item_id):
+                return True
+            encrypted_content = item.get("encrypted_content")
+            return isinstance(encrypted_content, str) and bool(
+                ResponsesAPIRequestUtils._unwrap_encrypted_content_with_model_id(encrypted_content)[0]
+            )
+
+        return [item for item in request_input if not _is_stale(item)]
+
     async def async_filter_deployments(
         self,
         model: str,
@@ -223,6 +271,11 @@ class EncryptedContentAffinityCheck(CustomLogger):
         a 429-induced cooldown surfaces as 429 (with ``Retry-After`` set to the
         remaining cooldown window) so OpenAI-compatible clients back off and
         retry after the deployment is eligible again.
+
+        With ``drop_stale_encrypted_content`` enabled, the no-peer case instead
+        drops the stale encrypted reasoning items from ``input`` (keeping the
+        visible message history) and returns the full healthy pool so the
+        request routes normally.
         """
         request_kwargs = request_kwargs or {}
         typed_healthy_deployments: Final = cast(list[dict], healthy_deployments)
@@ -275,6 +328,16 @@ class EncryptedContentAffinityCheck(CustomLogger):
             )
             request_kwargs["_encrypted_content_affinity_pinned"] = True
             return boundary_matches
+
+        if self.drop_stale_encrypted_content:
+            request_kwargs["input"] = self._drop_stale_encrypted_items(request_input)
+            verbose_router_logger.info(
+                "EncryptedContentAffinityCheck: model_id=%s has no encryption-boundary peer in "
+                "model group %s; dropped stale encrypted reasoning items and routing normally",
+                model_id,
+                model,
+            )
+            return typed_healthy_deployments
 
         # Dispatching to a non-peer would guarantee an upstream
         # `invalid_encrypted_content` 400, so fail fast with a clearer error.

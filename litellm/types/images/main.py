@@ -16,6 +16,8 @@ class ImageEditOptionalRequestParams(TypedDict, total=False):
     input_fidelity: Literal["high", "low"] | None
     mask: str | None
     n: int | None
+    output_compression: int | None
+    output_format: Literal["png", "jpeg", "webp"] | None
     quality: Literal["high", "medium", "low", "standard", "auto"] | None
     response_format: Literal["url", "b64_json"] | None
     size: str | None

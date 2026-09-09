@@ -9,6 +9,7 @@
 #   6) encrypted_content affinity: credential-backed encryption boundary + drop_stale_encrypted_content flag
 #   7) images: keep extra_headers out of the image generation request body (400 Unknown parameter)
 #   8) images: keep gpt-image optional params (background/output_format/...) + tolerate null nested usage details
+#   9) image edits: forward output_format/output_compression instead of silently dropping them
 FROM ghcr.io/berriai/litellm-database:v1.99.1
 
 RUN /app/.venv/bin/python -m ensurepip \
@@ -45,6 +46,10 @@ COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /a
 
 # Patch 8: images - keep gpt-image optional params (background etc.) + tolerate null nested usage details
 COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
+
+# Patch 9: image edits - forward output_format/output_compression instead of silently dropping them
+COPY litellm/types/images/main.py /app/.venv/lib/python3.13/site-packages/litellm/types/images/main.py
+COPY litellm/llms/openai/image_edit/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/openai/image_edit/transformation.py
 
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true

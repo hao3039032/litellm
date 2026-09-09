@@ -8,6 +8,7 @@
 #   5) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
 #   6) encrypted_content affinity: credential-backed encryption boundary + drop_stale_encrypted_content flag
 #   7) images: keep extra_headers out of the image generation request body (400 Unknown parameter)
+#   8) images: keep gpt-image optional params (background/output_format/...) + tolerate null nested usage details
 FROM ghcr.io/berriai/litellm-database:v1.99.1
 
 RUN /app/.venv/bin/python -m ensurepip \
@@ -42,10 +43,13 @@ COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /a
 # Patch 7: images - extra_headers must not leak into the request body on /v1/images/*
 # (litellm/utils.py already covered by the COPY above; the fix lives in get_optional_params_image_gen)
 
+# Patch 8: images - keep gpt-image optional params (background etc.) + tolerate null nested usage details
+COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing + credential-backed encrypted_content affinity + images extra_headers body-leak fix"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing + credential-backed encrypted_content affinity + images fixes (extra_headers leak, gpt-image optional params, null usage details)"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.99.1"

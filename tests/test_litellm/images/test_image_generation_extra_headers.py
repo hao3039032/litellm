@@ -8,7 +8,9 @@ code paths.
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 
 import litellm
@@ -73,3 +75,53 @@ class TestImageGenerationExtraHeaders:
         )
 
         assert "extra_headers" not in optional_params
+
+    @pytest.mark.asyncio
+    async def test_extra_headers_not_serialized_into_request_body(self):
+        """
+        extra_headers must ride the SDK header transport, never the JSON body.
+
+        Regression test: when the proxy injects data["extra_headers"] (e.g.
+        LITELLM_FORWARD_CLIENT_USER_AGENT), it fell into non_default_params,
+        landed in extra_body, and the OpenAI SDK merged it into the request
+        body as a top-level field, which OpenAI rejects with
+        "Unknown parameter: 'extra_headers'".
+        """
+        captured: dict = {}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(
+                200,
+                json={"created": 1234567890, "data": [{"b64_json": "aGk="}]},
+            )
+
+        sdk_client = AsyncOpenAI(
+            api_key="sk-test",
+            base_url=None,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            max_retries=0,
+        )
+
+        import json
+
+        from litellm.images.main import aimage_generation
+
+        await aimage_generation(
+            model="gpt-image-2",
+            prompt="A red circle",
+            n=1,
+            quality="low",
+            size="1024x1024",
+            extra_headers={"user-agent": "python-requests/2.31"},
+            client=sdk_client,
+            num_retries=0,
+            max_retries=0,
+            litellm_call_id="test-call-id",
+        )
+
+        body = json.loads(captured["body"])
+        assert "extra_headers" not in body
+        assert sorted(body.keys()) == ["model", "n", "prompt", "quality", "size"]
+        assert "python-requests/2.31" in captured["headers"].get("user-agent", "")

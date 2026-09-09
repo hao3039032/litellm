@@ -3138,6 +3138,11 @@ def get_optional_params_image_gen(
     additional_drop_params = passed_params.pop("additional_drop_params", None)
     special_params: Final[Mapping[str, object]] = passed_params.pop("kwargs")
     for k, v in special_params.items():
+        if k == "extra_headers":
+            # transport-level option, not a request-body field: flowing into
+            # extra_body would surface it as a top-level body key and get
+            # rejected by the provider ("Unknown parameter: 'extra_headers'")
+            continue
         if (
             k.startswith("aws_")
             and (custom_llm_provider != "bedrock" and custom_llm_provider != "sagemaker")

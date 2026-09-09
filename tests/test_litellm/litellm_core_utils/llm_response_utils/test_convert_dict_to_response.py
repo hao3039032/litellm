@@ -99,3 +99,35 @@ def test_handle_invalid_parallel_tool_calls_skips_custom_tool_calls():
     )
     result = _handle_invalid_parallel_tool_calls([custom_tool_call, function_tool_call])
     assert result == [custom_tool_call, function_tool_call]
+
+
+def test_convert_image_response_defaults_nested_none_usage_fields():
+    """
+    Regression test: some image providers return null inside
+    usage.input_tokens_details / output_tokens_details (e.g.
+    {'image_tokens': None, 'text_tokens': 10}). ImageUsageInputTokensDetails
+    declares int fields, so the None crashes pydantic validation with
+    "Input should be a valid integer" and the whole request fails with an
+    APIConnectionError even though the image was generated.
+    """
+    response_object = {
+        "created": 1788948336,
+        "data": [{"b64_json": "aGk="}],
+        "usage": {
+            "input_tokens": 10,
+            "input_tokens_details": {"image_tokens": None, "text_tokens": 10},
+            "output_tokens": 515,
+            "output_tokens_details": {"image_tokens": 515, "text_tokens": None},
+            "total_tokens": 525,
+        },
+    }
+    result = convert_to_model_response_object(
+        response_object=response_object,
+        response_type="image_generation",
+    )
+    assert result.usage is not None
+    assert result.usage.input_tokens_details.image_tokens == 0
+    assert result.usage.input_tokens_details.text_tokens == 10
+    assert result.usage.output_tokens_details is not None
+    assert result.usage.output_tokens_details["image_tokens"] == 515
+    assert result.usage.output_tokens_details["text_tokens"] == 0

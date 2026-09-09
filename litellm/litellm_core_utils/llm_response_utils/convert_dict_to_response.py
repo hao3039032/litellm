@@ -434,6 +434,14 @@ class LiteLLMResponseObjectHandler:
                     "image_tokens": 0,
                     "text_tokens": 0,
                 }
+            else:
+                for field in ("image_tokens", "text_tokens"):
+                    if usage["input_tokens_details"].get(field) is None:
+                        usage["input_tokens_details"][field] = 0
+            if usage.get("output_tokens_details") is not None:
+                for field in ("image_tokens", "text_tokens"):
+                    if usage["output_tokens_details"].get(field) is None:
+                        usage["output_tokens_details"][field] = 0
 
             # Map Responses API naming to Chat Completions API naming for cost calculator
             if usage.get("prompt_tokens") is None:

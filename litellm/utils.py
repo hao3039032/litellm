@@ -3166,6 +3166,10 @@ def get_optional_params_image_gen(
         "imageConfig": None,
         "tools": None,
         "web_search_options": None,
+        "background": None,
+        "moderation": None,
+        "output_compression": None,
+        "output_format": None,
     }
 
     non_default_params: Final = _get_non_default_params(

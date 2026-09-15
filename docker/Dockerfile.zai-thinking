@@ -10,6 +10,7 @@
 #   7) images: keep extra_headers out of the image generation request body (400 Unknown parameter)
 #   8) images: keep gpt-image optional params (background/output_format/...) + tolerate null nested usage details
 #   9) image edits: forward output_format/output_compression instead of silently dropping them
+#  10) strip_images handler: replace image content blocks with placeholder text for text-only GLM models
 FROM ghcr.io/berriai/litellm-database:v1.99.1
 
 RUN /app/.venv/bin/python -m ensurepip \
@@ -51,10 +52,13 @@ COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /
 COPY litellm/types/images/main.py /app/.venv/lib/python3.13/site-packages/litellm/types/images/main.py
 COPY litellm/llms/openai/image_edit/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/openai/image_edit/transformation.py
 
+# Patch 10: strip_images pre-call hook - loaded via litellm_settings.callbacks in config.yaml
+COPY docker/strip_images.py /app/strip_images.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks zai/glm-5.2)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm-5.2 thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing + credential-backed encrypted_content affinity + images fixes (extra_headers leak, gpt-image optional params, null usage details)"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.99.1 with reasoning extra_body routing + zai/glm-5.2 + zai/glm-5v-turbo + backup file + ZAI UI registration + client UA forwarding + OpenCode session routing + credential-backed encrypted_content affinity + images fixes (extra_headers leak, gpt-image optional params, null usage details) + strip_images hook"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/litellm_forward_client_user_agent"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.99.1"

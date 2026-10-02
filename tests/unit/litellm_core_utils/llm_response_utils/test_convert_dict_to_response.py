@@ -3182,3 +3182,32 @@ def test_url_citation_annotations_keep_provider_keys() -> None:
 
     assert message.annotations == [_URL_CITATION]
     assert "annotations" not in (message.provider_specific_fields or {})
+
+
+def test_convert_image_response_defaults_nested_none_usage_fields():
+    """
+    Regression: image providers can return null inside usage.input_tokens_details /
+    output_tokens_details, which crashed pydantic validation and failed the whole request
+    even though the image was generated.
+    """
+    response_object: Final = {
+        "created": 1788948336,
+        "data": [{"b64_json": "aGk="}],
+        "usage": {
+            "input_tokens": 10,
+            "input_tokens_details": {"image_tokens": None, "text_tokens": 10},
+            "output_tokens": 515,
+            "output_tokens_details": {"image_tokens": 515, "text_tokens": None},
+            "total_tokens": 525,
+        },
+    }
+    result: Final = convert_to_model_response_object(
+        response_object=response_object,
+        response_type="image_generation",
+    )
+    assert result.usage is not None
+    assert result.usage.input_tokens_details.image_tokens == 0
+    assert result.usage.input_tokens_details.text_tokens == 10
+    assert result.usage.output_tokens_details is not None
+    assert result.usage.output_tokens_details["image_tokens"] == 515
+    assert result.usage.output_tokens_details["text_tokens"] == 0

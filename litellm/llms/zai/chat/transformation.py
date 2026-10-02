@@ -13,6 +13,7 @@ from ...openai.chat.gpt_transformation import OpenAIGPTConfig
 
 ZAI_API_BASE: Final = "https://api.z.ai/api/paas/v4"
 TOKEN_LIMIT_PARAMS: Final = frozenset({"max_tokens", "max_completion_tokens"})
+REASONING_PARAMS: Final = frozenset({"thinking", "reasoning_effort"})
 
 
 def _is_json_object(
@@ -29,6 +30,20 @@ def _exceeds_output_limit(model: str, max_tokens: object) -> bool:
     info: Final = lookup_model_info_for_registration(model=model, custom_llm_provider="zai")
     limit: Final = None if isinstance(info, ModelInfoLookupMiss) else info.get("max_output_tokens")
     return isinstance(max_tokens, int) and isinstance(limit, int) and max_tokens > limit
+
+
+def _web_search_tool(web_search_options: object) -> Mapping[str, object]:
+    options: Final = web_search_options if _is_json_object(web_search_options) else {}
+    native_options: Final = {
+        key: value
+        for key in ("search_query", "search_engine")
+        if isinstance((value := options.get(key)), str) and value
+    }
+    return {"type": "web_search", "web_search": {"enable": True, "search_result": True, **native_options}}
+
+
+def _reasoning_value(value: object) -> object:
+    return value.get("effort", value) if _is_json_object(value) else value
 
 
 def _schema_without_native_support(model: str, response_format: object) -> Mapping[str, object] | None:
@@ -88,11 +103,12 @@ class ZAIChatConfig(OpenAIGPTConfig):
             "stop",
             "tools",
             "tool_choice",
+            "web_search_options",
         ]
 
         try:
             if litellm.supports_reasoning(model=model, custom_llm_provider=self.custom_llm_provider):
-                base_params.append("thinking")
+                base_params.extend(REASONING_PARAMS)
         except Exception:
             pass
 
@@ -112,10 +128,24 @@ class ZAIChatConfig(OpenAIGPTConfig):
             (litellm.drop_params or drop_params) and _exceeds_output_limit(model, max_completion_tokens)
         )
         max_tokens: Final = sent.get("max_tokens") if falls_back_to_max_tokens else max_completion_tokens
+        reasoning: Final = {
+            param: _reasoning_value(value) for param, value in sent.items() if param in REASONING_PARAMS
+        }
+        current_extra_body: Final = optional_params.get("extra_body")
+        extra_body: Final = current_extra_body if _is_json_object(current_extra_body) else {}
+        current_tools: Final = optional_params.get("tools")
+        caller_tools: Final = current_tools if isinstance(current_tools, list) else []
+        passthrough_params: Final = TOKEN_LIMIT_PARAMS | REASONING_PARAMS | frozenset({"web_search_options"})
         return {
             **optional_params,
-            **{param: value for param, value in sent.items() if param not in TOKEN_LIMIT_PARAMS},
+            **{param: value for param, value in sent.items() if param not in passthrough_params},
             **({} if max_tokens is None else {"max_tokens": max_tokens}),
+            **({} if not reasoning else {"extra_body": {**extra_body, **reasoning}}),
+            **(
+                {}
+                if "web_search_options" not in sent
+                else {"tools": [*caller_tools, _web_search_tool(sent["web_search_options"])]}
+            ),
         }
 
     def transform_request(

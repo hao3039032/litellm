@@ -6,13 +6,16 @@ to the OpenAI SDK on the openai/litellm_proxy/openai_compatible_providers
 code paths.
 """
 
-from unittest.mock import MagicMock, patch
+import json
+from unittest.mock import patch
 
+import httpx
 import pytest
-
+from openai import AsyncOpenAI
 
 import litellm
-from litellm.images.main import image_generation
+from litellm.images.main import aimage_generation, image_generation
+from litellm.llms.custom_httpx.http_handler import HTTPHandler
 
 
 class TestImageGenerationExtraHeaders:
@@ -73,3 +76,70 @@ class TestImageGenerationExtraHeaders:
         )
 
         assert "extra_headers" not in optional_params
+
+    @pytest.mark.asyncio
+    async def test_extra_headers_not_serialized_into_request_body(self):
+        """
+        Regression: proxy-injected extra_headers (client UA forwarding) landed in
+        extra_body and the OpenAI SDK merged it into the JSON body root, which
+        OpenAI rejects with "Unknown parameter: 'extra_headers'".
+        """
+        captured: dict = {}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(
+                200,
+                json={"created": 1234567890, "data": [{"b64_json": "aGk="}]},
+            )
+
+        sdk_client = AsyncOpenAI(
+            api_key="sk-test",
+            base_url=None,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            max_retries=0,
+        )
+
+        await aimage_generation(
+            model="gpt-image-2",
+            prompt="A red circle",
+            n=1,
+            quality="low",
+            size="1024x1024",
+            extra_headers={"user-agent": "python-requests/2.31"},
+            client=sdk_client,
+            num_retries=0,
+            max_retries=0,
+            litellm_call_id="test-call-id",
+        )
+
+        body = json.loads(captured["body"])
+        assert "extra_headers" not in body
+        assert sorted(body.keys()) == ["model", "n", "prompt", "quality", "size"]
+        assert "python-requests/2.31" in captured["headers"].get("user-agent", "")
+
+    def test_extra_headers_reach_llm_http_handler_provider(self):
+        """
+        Providers routed through llm_http_handler read headers from
+        optional_params["extra_headers"], so keeping extra_headers out of the
+        OpenAI extra_body must not drop them on this path.
+        """
+        captured: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(
+                200,
+                json={"created": 1234567890, "data": [{"url": "https://example.com/image.png"}]},
+            )
+
+        image_generation(
+            model="recraft/recraftv3",
+            prompt="A red circle",
+            api_key="test-key",
+            extra_headers={"user-agent": "python-requests/2.31"},
+            client=HTTPHandler(client=httpx.Client(transport=httpx.MockTransport(handler))),
+        )
+
+        assert captured["headers"].get("user-agent") == "python-requests/2.31"

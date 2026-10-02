@@ -1,0 +1,81 @@
+# Minimal patch image based on upstream v1.103.2 release.
+# Applies file patches for zai GLM + reasoning routing + UI registration + client UA forwarding + OpenCode.
+# Upstream 1.103.2 already ships most of what earlier patch images carried; these patches only add what 1.103.2 lacks:
+#   0) socksio + aiohttp-socks so outbound proxies configured via HTTP(S)_PROXY can use socks:// URLs
+#   1) zai transformation: route thinking/reasoning_effort into extra_body; web_search_options maps to
+#      GLM's native {"type":"web_search"} chat tool
+#   2) backup model cost map: add zai/glm-5v-turbo + zai/glm-5.3-flashx + gpt-6-sol/luna
+#      (upstream 1.103.2 already has zai/glm-5.2 + glm-5.3 + glm-5.3-flash)
+#   3) force local backup usage so the entries above resolve without a remote map fetch
+#   4) provider_create_fields.json: register ZAI in Add Model UI dropdown + credential fields
+#   5) forward inbound client User-Agent to upstream provider when LITELLM_FORWARD_CLIENT_USER_AGENT is set
+#   6) OpenCode Zen + Go providers (opencode / opencode_go)
+#   7) image edits: forward output_format/output_compression instead of silently dropping them
+#   8) strip_images handler: replace image content blocks with placeholder text for text-only GLM models
+#   9) image generation: keep proxy-injected extra_headers out of the OpenAI extra_body (litellm/utils.py)
+#  10) image responses: default null image_tokens/text_tokens inside usage token details to 0
+#  11) encrypted_content affinity: api_key alone is a valid encryption boundary (key-only OpenAI
+#      credentials pin cross-group follow-ups to same-key peers), and the drop_stale_encrypted_content
+#      router flag strips stale encrypted reasoning instead of failing fast with 503/429 when the
+#      same-group origin is unavailable with no boundary peer
+#  12) responses: once encrypted reasoning is stripped for routing, the message / function_call /
+#      custom_tool_call items that followed it are replayed without their id (OpenAI otherwise rejects
+#      them as "provided without its required 'reasoning' item")
+#
+# Upstream 1.103.2 now includes (patch dropped): gpt-image optional params, gpt-6 series on the GPT-5
+# config path, the web_search client-tool passthrough guard in the /v1/messages bridge, and
+# credential-backed encryption boundaries (upstream's named-credential precedence is kept).
+FROM ghcr.io/berriai/litellm-database:v1.103.2
+
+RUN /app/.venv/bin/python -m ensurepip \
+    && /app/.venv/bin/python -m pip install --no-cache-dir socksio==1.0.0 aiohttp-socks==0.12.0
+
+# Patch 1: zai provider transformation (reasoning -> extra_body routing + native web_search tool)
+COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
+
+# Patch 2: backup model cost map (includes zai/glm-5v-turbo + glm-5.3-flashx + gpt-6-sol/luna)
+COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json
+
+# Patch 4: register ZAI provider in the Add Model UI dropdown + credential fields
+COPY litellm/proxy/public_endpoints/provider_create_fields.json /app/.venv/lib/python3.13/site-packages/litellm/proxy/public_endpoints/provider_create_fields.json
+
+# Patch 5: forward inbound client User-Agent upstream (LITELLM_FORWARD_CLIENT_USER_AGENT)
+COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py
+COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/litellm_pre_call_utils.py
+
+# Patch 6: OpenCode Zen + Go provider registration
+COPY litellm/_lazy_imports_registry.py /app/.venv/lib/python3.13/site-packages/litellm/_lazy_imports_registry.py
+COPY litellm/constants.py /app/.venv/lib/python3.13/site-packages/litellm/constants.py
+COPY litellm/litellm_core_utils/get_llm_provider_logic.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/get_llm_provider_logic.py
+COPY litellm/main.py /app/.venv/lib/python3.13/site-packages/litellm/main.py
+COPY litellm/provider_endpoints_support_backup.json /app/.venv/lib/python3.13/site-packages/litellm/provider_endpoints_support_backup.json
+COPY litellm/types/utils.py /app/.venv/lib/python3.13/site-packages/litellm/types/utils.py
+COPY litellm/utils.py /app/.venv/lib/python3.13/site-packages/litellm/utils.py
+COPY litellm/llms/opencode /app/.venv/lib/python3.13/site-packages/litellm/llms/opencode
+
+# Patch 7: image edits - forward output_format/output_compression instead of silently dropping them
+COPY litellm/types/images/main.py /app/.venv/lib/python3.13/site-packages/litellm/types/images/main.py
+COPY litellm/llms/openai/image_edit/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/openai/image_edit/transformation.py
+
+# Patch 8: strip_images pre-call hook - loaded via litellm_settings.callbacks in config.yaml
+COPY docker/strip_images.py /app/strip_images.py
+
+# Patch 9: image generation extra_headers body leak (litellm/utils.py already covered by the COPY above)
+
+# Patch 10: nested null image usage token details
+COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
+
+# Patch 11: encrypted_content affinity - key-only boundary + drop_stale_encrypted_content flag
+COPY litellm/router.py /app/.venv/lib/python3.13/site-packages/litellm/router.py
+COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /app/.venv/lib/python3.13/site-packages/litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py
+
+# Patch 12: responses - drop ids of items whose paired reasoning was stripped
+COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
+
+# Force litellm to use local backup (skip upstream raw fetch which lacks glm-5v-turbo etc.)
+ENV LITELLM_LOCAL_MODEL_COST_MAP=true
+
+LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.103.2 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx + gpt-6-sol/luna cost entries + ZAI UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + drop_stale_encrypted_content + orphaned item ids dropped after reasoning strip"
+LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"
+LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.103.2"

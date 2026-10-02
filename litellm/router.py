@@ -783,6 +783,7 @@ class Router:
         alerting_config: AlertingConfig | None = None,
         router_general_settings: RouterGeneralSettings | None = RouterGeneralSettings(),
         deployment_affinity_ttl_seconds: int = 3600,
+        drop_stale_encrypted_content: bool = False,
         model_group_affinity_config: dict[str, list[str]] | None = None,
         ignore_invalid_deployments: bool = False,
         enable_health_check_routing: bool = False,
@@ -827,6 +828,7 @@ class Router:
             alerting_config (AlertingConfig): Slack alerting configuration. Defaults to None.
             provider_budget_config (ProviderBudgetConfig): Provider budget configuration. Use this to set llm_provider budget limits. example $100/day to OpenAI, $100/day to Azure, etc. Defaults to None.
             deployment_affinity_ttl_seconds (int): TTL for user-key -> deployment affinity mapping. Defaults to 3600.
+            drop_stale_encrypted_content (bool): When True, a follow-up whose encrypted_content originated on a deployment that is a member of the routed model group but currently unavailable, with no same-encryption-boundary peer, has its encrypted reasoning stripped and routes normally instead of failing fast with 503/429. The visible message history is preserved. Defaults to False.
             ignore_invalid_deployments (bool): Ignores invalid deployments, and continues with other deployments. Default is to raise an error.
             enable_weighted_failover (bool): When True and the routing strategy is "simple-shuffle", a retryable failure on one deployment causes the request to re-pick (weighted) across the other deployments in the same model group before any cross-group fallback runs. Bounded by `max_fallbacks`. Async-only: currently honored by `router.acompletion()` and other async entrypoints. The sync `router.completion()` path falls back to the regular fallback flow. Defaults to False.
             fallback_access_check (Optional[FallbackAccessCheck]): Awaited before each cross-model-group fallback attempt on the async path; a fallback target it rejects is skipped. Defaults to None (every configured fallback is attempted).
@@ -992,6 +994,7 @@ class Router:
         self._provider_unresolved_deployments: tuple[Callable[[], Deployment | None], ...] = ()
 
         self.deployment_affinity_ttl_seconds = deployment_affinity_ttl_seconds
+        self.drop_stale_encrypted_content = drop_stale_encrypted_content
         self.model_group_affinity_config = model_group_affinity_config
         warn_on_unknown_model_group_affinity_flags(model_group_affinity_config)
 
@@ -2198,12 +2201,14 @@ class Router:
                     existing_ec_callback.enable_global_affinity or enable_global_affinity
                 )
                 existing_ec_callback.model_group_affinity_config = self.model_group_affinity_config or {}
+                existing_ec_callback.drop_stale_encrypted_content = self.drop_stale_encrypted_content
                 ec_callback = existing_ec_callback
             else:
                 ec_callback = EncryptedContentAffinityCheck(
                     router=self,
                     enable_global_affinity=enable_global_affinity,
                     model_group_affinity_config=self.model_group_affinity_config,
+                    drop_stale_encrypted_content=self.drop_stale_encrypted_content,
                 )
                 self.optional_callbacks.append(ec_callback)
                 litellm.logging_callback_manager.add_litellm_callback(ec_callback)

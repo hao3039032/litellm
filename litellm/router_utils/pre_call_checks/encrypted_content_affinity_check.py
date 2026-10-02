@@ -87,11 +87,13 @@ class EncryptedContentAffinityCheck(CustomLogger):
         router: Optional["Router"] = None,
         enable_global_affinity: bool = True,
         model_group_affinity_config: dict[str, list[str]] | None = None,
+        drop_stale_encrypted_content: bool = False,
     ) -> None:
         super().__init__()
         self.router = router
         self.enable_global_affinity = enable_global_affinity
         self.model_group_affinity_config: dict[str, list[str]] = model_group_affinity_config or {}
+        self.drop_stale_encrypted_content = drop_stale_encrypted_content
 
     # ------------------------------------------------------------------
     # Helpers
@@ -222,6 +224,12 @@ class EncryptedContentAffinityCheck(CustomLogger):
         The values are resolved from the deployment and its named credential
         without modifying the deployment.
 
+        ``api_key`` alone is a valid boundary when no ``api_base`` is set
+        (first-party OpenAI-style deployments on the provider's default base):
+        the key identifies the org that owns the encrypted content, so two
+        key-only deployments are peers iff they share the key. An unset or explicitly empty base is
+        normalized to ``""`` so it never matches a deployment with a non-empty explicit base.
+
         Accepts any object exposing dict-style ``.get(key, default)``: plain
         dicts (the common case in ``healthy_deployments``) as well as
         ``LiteLLM_Params``-style Pydantic instances, which define a custom
@@ -251,9 +259,9 @@ class EncryptedContentAffinityCheck(CustomLogger):
             if credential_values is not None and "api_key" in credential_values
             else api_key
         )
-        if not effective_api_base or not effective_api_key:
+        if not effective_api_key:
             return None
-        return (effective_api_base, effective_api_key)
+        return (effective_api_base or "", effective_api_key)
 
     def _find_deployments_on_same_encryption_boundary(
         self,
@@ -308,6 +316,10 @@ class EncryptedContentAffinityCheck(CustomLogger):
         a 429-induced cooldown surfaces as 429 (with ``Retry-After`` set to the
         remaining cooldown window) so OpenAI-compatible clients back off and
         retry after the deployment is eligible again.
+
+        With ``drop_stale_encrypted_content`` enabled, that unavailable-origin case
+        strips the encrypted reasoning and dispatches to the healthy pool instead of
+        raising.
         """
         request_kwargs = request_kwargs or {}
         typed_healthy_deployments: Final = cast(list[dict], healthy_deployments)
@@ -382,6 +394,16 @@ class EncryptedContentAffinityCheck(CustomLogger):
                 "EncryptedContentAffinityCheck: model_id=%s is not a candidate for the routed group %s; "
                 "forwarding without its encrypted reasoning",
                 model_id,
+                model,
+            )
+            ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)
+            strip_encrypted_reasoning_from_messages(anthropic_messages)
+            return typed_healthy_deployments
+
+        if self.drop_stale_encrypted_content:
+            verbose_router_logger.info(
+                "EncryptedContentAffinityCheck: originating deployment for model group %s is unavailable "
+                "with no encryption-boundary peer; dropping stale encrypted reasoning and routing normally",
                 model,
             )
             ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)

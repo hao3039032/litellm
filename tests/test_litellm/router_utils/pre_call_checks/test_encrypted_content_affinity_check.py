@@ -1263,7 +1263,7 @@ def test_boundary_key_rejects_non_dict_like_inputs():
     for bad in (None, [], "not a dict", 42, object()):
         assert EncryptedContentAffinityCheck._encryption_boundary_key(bad) is None
 
-    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) is None
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) == ("", "k")
     assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "https://x"}) is None
 
 
@@ -2120,3 +2120,291 @@ async def test_affinity_honors_router_candidate_ids_for_team_and_pattern_routes(
 
     assert request_kwargs["input"][1].get("encrypted_content")
     mock_router.get_candidate_model_ids_for_route.assert_called_once_with(model="team-public-model", team_id="teamA")
+
+
+def test_boundary_key_accepts_api_key_only():
+    """A first-party OpenAI-style deployment has no api_base: the key alone identifies the
+    org that owns the encrypted content. An unset base normalizes to "" so a key-only
+    deployment never matches a deployment that pins an explicit base with the same key."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    key_only = EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": "k"})
+
+    assert key_only == ("", "k")
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": None, "api_key": "k"}) == key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) == key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "https://x", "api_key": "k"}) != key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": "other"}) != key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": ""}) is None
+
+
+def test_boundary_key_resolves_api_key_only_named_credential():
+    """Deployments that reference a key-only credential (no api_base) share a boundary
+    with every other deployment on that credential, and not with a different key."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    with patch.object(  # test-quality-ok: credential registry is the direct dependency under test
+        litellm,
+        "credential_list",
+        [
+            CredentialItem(credential_name="openai-direct", credential_values={"api_key": "key-a"}, credential_info={}),
+            CredentialItem(credential_name="openai-other", credential_values={"api_key": "key-b"}, credential_info={}),
+        ],
+    ):
+        a = EncryptedContentAffinityCheck._encryption_boundary_key({"litellm_credential_name": "openai-direct"})
+        b = EncryptedContentAffinityCheck._encryption_boundary_key({"litellm_credential_name": "openai-other"})
+
+    assert a == ("", "key-a")
+    assert b == ("", "key-b")
+
+
+@pytest.mark.asyncio
+async def test_affinity_pins_to_key_only_credential_peer_on_model_group_switch():
+    """A follow-up whose encrypted reasoning came from a key-only credential deployment in
+    another model group (e.g. luna -> sol on one OpenAI org) pins to the routed group's
+    deployment on the same credential and keeps the encrypted reasoning intact."""
+    from unittest.mock import MagicMock
+
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    originating = MagicMock()
+    originating.model_name = "gpt-5.6-luna"
+    originating.litellm_params.model_dump.return_value = {
+        "model": "openai/gpt-5.6-luna",
+        "litellm_credential_name": "openai-direct",
+    }
+    mock_router = _make_router_mock_with_cooldown(originating)
+    check = EncryptedContentAffinityCheck(router=mock_router)
+
+    same_org = {
+        "model_info": {"id": "sol-same-org"},
+        "model_name": "gpt-5.6-sol",
+        "litellm_params": {"model": "openai/gpt-5.6-sol", "litellm_credential_name": "openai-direct"},
+    }
+    other_org = {
+        "model_info": {"id": "sol-other-org"},
+        "model_name": "gpt-5.6-sol",
+        "litellm_params": {"model": "openai/gpt-5.6-sol", "litellm_credential_name": "openai-other"},
+    }
+    wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "luna-origin")
+    request_kwargs: dict = {
+        "input": [
+            {"role": "user", "content": "hi"},
+            {"type": "reasoning", "encrypted_content": wrapped, "summary": []},
+        ],
+    }
+
+    with patch.object(  # test-quality-ok: credential registry is the direct dependency under test
+        litellm,
+        "credential_list",
+        [
+            CredentialItem(credential_name="openai-direct", credential_values={"api_key": "key-a"}, credential_info={}),
+            CredentialItem(credential_name="openai-other", credential_values={"api_key": "key-b"}, credential_info={}),
+        ],
+    ):
+        result = await check.async_filter_deployments(
+            model="gpt-5.6-sol",
+            healthy_deployments=[same_org, other_org],
+            messages=None,
+            request_kwargs=request_kwargs,
+        )
+
+    assert result == [same_org]
+    assert request_kwargs["_encrypted_content_affinity_pinned"] is True
+    assert request_kwargs["input"][1]["encrypted_content"] == wrapped
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cooldown_status", ["500", "429"])
+async def test_drop_stale_strips_instead_of_raising_when_origin_unavailable(cooldown_status):
+    """With drop_stale_encrypted_content, an unavailable same-group origin with no boundary
+    peer no longer fails the turn with 503/429: the encrypted reasoning is stripped, the
+    readable history is kept, and the request dispatches to the healthy pool."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    originating = _make_originating_mock("https://account-a.openai.azure.com/", "key-a")
+    mock_router = _make_router_mock_with_cooldown(
+        originating,
+        cooldown_entries=[
+            (
+                "deployment-a-cooled",
+                {
+                    "exception_received": "boom",
+                    "status_code": cooldown_status,
+                    "timestamp": time.time(),
+                    "cooldown_time": 60.0,
+                },
+            )
+        ],
+        routed_group_model_ids=["deployment-a-cooled", "deployment-b"],
+    )
+    check = EncryptedContentAffinityCheck(router=mock_router, drop_stale_encrypted_content=True)
+    healthy_only_b = [
+        {
+            "model_info": {"id": "deployment-b"},
+            "model_name": "gpt-5.4",
+            "litellm_params": {
+                "api_base": "https://account-b.openai.azure.com/",
+                "api_key": "key-b",
+                "model": "azure/gpt-5.4",
+            },
+        }
+    ]
+    wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "deployment-a-cooled")
+    request_kwargs: dict = {
+        "input": [
+            {"role": "user", "content": "why is the sky blue?"},
+            {"type": "reasoning", "encrypted_content": wrapped, "summary": []},
+            {"role": "user", "content": "and sunsets?"},
+        ],
+    }
+
+    result = await check.async_filter_deployments(
+        model="gpt-5.4",
+        healthy_deployments=healthy_only_b,
+        messages=None,
+        request_kwargs=request_kwargs,
+    )
+
+    assert result is healthy_only_b
+    assert not any(isinstance(item, dict) and item.get("encrypted_content") for item in request_kwargs["input"])
+    assert [item.get("content") for item in request_kwargs["input"] if item.get("role") == "user"] == [
+        "why is the sky blue?",
+        "and sunsets?",
+    ]
+    assert "_encrypted_content_affinity_pinned" not in request_kwargs
+
+
+def test_router_plumbs_drop_stale_encrypted_content_into_the_check():
+    """router_settings.drop_stale_encrypted_content must be an accepted Router arg (the proxy
+    drops unknown router_settings keys) and must reach the encrypted_content_affinity check."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    assert "drop_stale_encrypted_content" in litellm.Router.get_valid_args()
+
+    model_list = [
+        {
+            "model_name": "gpt-5.4",
+            "litellm_params": {"model": "openai/gpt-5.4", "api_key": "mock-key"},
+            "model_info": {"id": "deployment-1"},
+        }
+    ]
+    enabled = litellm.Router(
+        model_list=model_list,
+        optional_pre_call_checks=["encrypted_content_affinity"],
+        drop_stale_encrypted_content=True,
+    )
+    default = litellm.Router(model_list=model_list, optional_pre_call_checks=["encrypted_content_affinity"])
+
+    def _check_of(router):
+        return next(cb for cb in router.optional_callbacks or [] if isinstance(cb, EncryptedContentAffinityCheck))
+
+    assert _check_of(enabled).drop_stale_encrypted_content is True
+    assert _check_of(default).drop_stale_encrypted_content is False
+
+
+@pytest.mark.asyncio
+async def test_drop_stale_strips_bridge_reasoning_from_messages_when_origin_unavailable():
+    """The /v1/messages twin: with drop_stale_encrypted_content, an unavailable same-group
+    origin with no boundary peer drops the bridge-tagged thinking blocks whole and the
+    request dispatches to the healthy pool instead of failing with 503."""
+    originating = _make_originating_mock(None, "key-a", model_name="gpt-5.4")
+    mock_router = _make_router_mock_with_cooldown(
+        originating, cooldown_entries=[], routed_group_model_ids=["openai-org-a", "openai-org-b"]
+    )
+    check = EncryptedContentAffinityCheck(router=mock_router, drop_stale_encrypted_content=True)
+    routed_pool = [
+        {"model_info": {"id": "openai-org-b"}, "litellm_params": {"model": "openai/gpt-5.4", "api_key": "key-b"}}
+    ]
+    messages = _bridge_replayed_anthropic_messages(minted_by="openai-org-a")
+    assistant_content = messages[1]["content"]
+    request_kwargs: dict = {"model": "gpt-5.4"}
+
+    result = await check.async_filter_deployments(
+        model="gpt-5.4",
+        healthy_deployments=routed_pool,
+        messages=messages,
+        request_kwargs=request_kwargs,
+    )
+
+    assert result is routed_pool
+    assert "_encrypted_content_affinity_pinned" not in request_kwargs
+    assert assistant_content == [
+        {"type": "thinking", "thinking": "Anthropic minted this one", "signature": "ErcCCpIBCBEYAipA"},
+        {"type": "text", "text": "The zebra owner lives in the green house."},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drop_stale_still_pins_to_boundary_peer_when_one_exists():
+    """drop_stale_encrypted_content only applies when no peer can decrypt the content: a
+    same-key peer in the healthy pool still wins and the encrypted reasoning is kept."""
+    originating = _make_originating_mock(None, "key-a")
+    mock_router = _make_router_mock_with_cooldown(
+        originating, cooldown_entries=[], routed_group_model_ids=["origin-cooled", "peer", "other-org"]
+    )
+    check = EncryptedContentAffinityCheck(router=mock_router, drop_stale_encrypted_content=True)
+    peer = {"model_info": {"id": "peer"}, "litellm_params": {"model": "openai/gpt-5.4", "api_key": "key-a"}}
+    other_org = {"model_info": {"id": "other-org"}, "litellm_params": {"model": "openai/gpt-5.4", "api_key": "key-b"}}
+    wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "origin-cooled")
+    request_kwargs: dict = {"input": [{"type": "reasoning", "encrypted_content": wrapped, "summary": []}]}
+
+    result = await check.async_filter_deployments(
+        model="gpt-5.4",
+        healthy_deployments=[peer, other_org],
+        messages=None,
+        request_kwargs=request_kwargs,
+    )
+
+    assert result == [peer]
+    assert request_kwargs["_encrypted_content_affinity_pinned"] is True
+    assert request_kwargs["input"][0]["encrypted_content"] == wrapped
+
+
+@pytest.mark.asyncio
+async def test_drop_stale_still_pins_when_origin_itself_is_healthy():
+    """drop_stale never applies when the originating deployment is itself healthy: the
+    direct pin wins and the encrypted reasoning is forwarded untouched."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    originating = _make_originating_mock(None, "key-a")
+    mock_router = _make_router_mock_with_cooldown(originating)
+    check = EncryptedContentAffinityCheck(router=mock_router, drop_stale_encrypted_content=True)
+    origin_deployment = {
+        "model_info": {"id": "origin-healthy"},
+        "litellm_params": {"model": "openai/gpt-5.4", "api_key": "key-a"},
+    }
+    other_org = {
+        "model_info": {"id": "other-org"},
+        "litellm_params": {"model": "openai/gpt-5.4", "api_key": "key-b"},
+    }
+    encoded_id = ResponsesAPIRequestUtils._build_encrypted_item_id("origin-healthy", "rs_1")
+    request_kwargs: dict = {
+        "input": [
+            {"role": "user", "content": "hi"},
+            {"type": "reasoning", "id": encoded_id, "encrypted_content": "gAAAAA-blob"},
+        ],
+    }
+
+    result = await check.async_filter_deployments(
+        model="gpt-5.4",
+        healthy_deployments=[origin_deployment, other_org],
+        messages=None,
+        request_kwargs=request_kwargs,
+    )
+
+    assert result == [origin_deployment]
+    assert request_kwargs["_encrypted_content_affinity_pinned"] is True
+    assert request_kwargs["input"][1]["encrypted_content"] == "gAAAAA-blob"

@@ -51,6 +51,18 @@ def _is_object_dict(
     return isinstance(value, dict)
 
 
+_ID_OPTIONAL_REASONING_FOLLOWER_TYPES: Final = frozenset({"function_call", "custom_tool_call"})
+
+
+def _has_optional_reasoning_paired_id(item: Mapping[str, object]) -> bool:
+    if "id" not in item:
+        return False
+    item_type: Final = item.get("type")
+    return item_type in _ID_OPTIONAL_REASONING_FOLLOWER_TYPES or (
+        item_type == "message" and item.get("role") == "assistant"
+    )
+
+
 def normalize_responses_api_stream_options(
     stream_options: object,
 ) -> ResponsesAPIStreamOptions | None:
@@ -569,13 +581,32 @@ class ResponsesAPIRequestUtils:
         if not isinstance(request_input, list):
             return
         items: Final = cast(list[object], request_input)  # cast-ok: untyped client json
-        stripped: Final = tuple(
-            ResponsesAPIRequestUtils._without_encrypted_reasoning(item)
-            if should_strip is None or (isinstance(item, Mapping) and should_strip(cast(Mapping[str, object], item)))
-            else item
-            for item in items
-        )
-        items[:] = (item for item in stripped if item is not None)
+        stripped: Final = tuple(ResponsesAPIRequestUtils._strip_reasoning_and_orphaned_ids(items, should_strip))
+        items[:] = stripped
+
+    @staticmethod
+    def _strip_reasoning_and_orphaned_ids(
+        items: Sequence[object],
+        should_strip: Callable[[Mapping[str, object]], bool] | None,
+    ) -> Iterable[object]:
+        """OpenAI pairs a replayed message / function call with the reasoning item before it by id and
+        rejects the request when that reasoning is missing, so once a reasoning item is stripped the
+        items that followed it are replayed without their id, like ordinary history."""
+        after_stripped_reasoning = False  # rebind-ok: toggled per reasoning group
+        for item in items:
+            if _is_object_dict(item) and item.get("type") == "reasoning":
+                kept: Final[object] = (
+                    ResponsesAPIRequestUtils._without_encrypted_reasoning(item)
+                    if should_strip is None or should_strip(cast(Mapping[str, object], item))
+                    else item
+                )
+                after_stripped_reasoning = kept is not item
+                if kept is not None:
+                    yield kept
+            elif after_stripped_reasoning and _is_object_dict(item) and _has_optional_reasoning_paired_id(item):
+                yield {key: value for key, value in item.items() if key != "id"}
+            else:
+                yield item
 
     @staticmethod
     def _without_encrypted_reasoning(item: object) -> object | None:

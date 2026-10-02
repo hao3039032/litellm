@@ -797,6 +797,8 @@ LITELLM_CHAT_PROVIDERS: Final = [
     "oci",
     "morph",
     "lambda_ai",
+    "opencode",
+    "opencode_go",
     "inception",
     "vercel_ai_gateway",
     "wandb",
@@ -990,6 +992,8 @@ openai_compatible_endpoints: Final[list] = [
     "https://api.prisminference.com/v1",
     "https://api.reka.ai/v1",
     "https://gigachat.devices.sberbank.ru/api/v1",
+    "https://opencode.ai/zen/go/v1",
+    "https://opencode.ai/zen/v1",
 ]
 
 
@@ -1047,6 +1051,8 @@ openai_compatible_providers: Final[list] = [
     "helicone",
     "morph",
     "lambda_ai",
+    "opencode",
+    "opencode_go",
     "inception",
     "hyperbolic",
     "vercel_ai_gateway",

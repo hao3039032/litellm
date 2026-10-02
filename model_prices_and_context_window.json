@@ -52942,6 +52942,7 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -52953,9 +52954,23 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "supports_vision": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "zai/glm-5v-turbo": {
+        "input_cost_per_token": 6e-07,
+        "output_cost_per_token": 1.8e-06,
+        "litellm_provider": "zai",
+        "max_input_tokens": 200000,
+        "max_output_tokens": 128000,
+        "mode": "chat",
+        "supports_function_calling": true,
+        "supports_reasoning": true,
+        "supports_tool_choice": true,
+        "supports_vision": true,
+        "source": "https://docs.bigmodel.cn/cn/guide/start/model-overview"
     },
     "zai/glm-4.5-x": {
         "input_cost_per_token": 2.2e-06,
@@ -52965,6 +52980,7 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -52976,6 +52992,7 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -52987,6 +53004,7 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -53009,6 +53027,7 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
+        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -75040,5 +75059,21 @@
         "supports_tool_choice": true,
         "supports_vision": true,
         "supports_web_search": false
+    },
+    "zai/glm-5.3-flashx": {
+        "cache_creation_input_token_cost": 0,
+        "cache_read_input_token_cost": 7.5e-08,
+        "input_cost_per_token": 3.7e-07,
+        "output_cost_per_token": 1.25e-06,
+        "litellm_provider": "zai",
+        "max_input_tokens": 1048576,
+        "max_output_tokens": 128000,
+        "mode": "chat",
+        "source": "https://docs.z.ai/guides/overview/pricing",
+        "supports_function_calling": true,
+        "supports_prompt_caching": true,
+        "supports_reasoning": true,
+        "supports_tool_choice": true,
+        "supports_vision": true
     }
 }

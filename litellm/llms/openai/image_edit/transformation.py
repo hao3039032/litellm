@@ -44,6 +44,8 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
             "mask",
             "model",
             "n",
+            "output_compression",
+            "output_format",
             "quality",
             "response_format",
             "size",

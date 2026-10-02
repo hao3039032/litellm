@@ -293,6 +293,20 @@ def test_zai_provider_fields():
     assert fields_by_key["api_base"]["default_value"] == "https://api.z.ai/api/paas/v4"
 
 
+@pytest.mark.parametrize("litellm_provider", ["opencode", "opencode_go"])
+def test_opencode_provider_key_lowercases_to_backend_slug(litellm_provider):
+    """OpenCode has no UI provider_map entry, so the Add Model submit path sends
+    provider.toLowerCase() as custom_llm_provider; it must equal the backend slug.
+    """
+    app_instance = FastAPI()
+    app_instance.include_router(router)
+    providers = TestClient(app_instance).get("/public/providers/fields").json()
+
+    entry = next(p for p in providers if p["litellm_provider"] == litellm_provider)
+
+    assert entry["provider"].lower() == litellm_provider
+
+
 def test_vllm_provider_display_names_are_distinct():
     """Hosted and local vLLM must not share a dropdown label.
 

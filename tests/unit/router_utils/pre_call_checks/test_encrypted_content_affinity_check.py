@@ -1930,7 +1930,7 @@ class TestStripEncryptedReasoningFromInput:
                 "type": "reasoning",
                 "summary": [{"type": "summary_text", "text": "thought about it"}],
             },
-            {"type": "message", "id": "msg_1", "role": "assistant", "content": "hi"},
+            {"type": "message", "role": "assistant", "content": "hi"},
             {"role": "user", "content": "second turn"},
         ]
 
@@ -1960,6 +1960,64 @@ class TestStripEncryptedReasoningFromInput:
         before = [dict(item) for item in request_input]
         ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)
         assert request_input == before
+
+    def test_drops_ids_of_items_that_followed_a_stripped_reasoning_item(self):
+        """OpenAI rejects a replayed message / function call whose paired reasoning item is missing
+        ("provided without its required 'reasoning' item") but accepts the same item without an id."""
+        wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "deployment-a")
+        request_input = [
+            {"role": "user", "content": "first turn"},
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": wrapped},
+            {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "f", "arguments": "{}"},
+            {"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_2", "name": "g", "input": "x"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": "done"},
+            {"role": "user", "content": "second turn"},
+        ]
+
+        ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)
+
+        assert request_input == [
+            {"role": "user", "content": "first turn"},
+            {"type": "function_call", "call_id": "call_1", "name": "f", "arguments": "{}"},
+            {"type": "custom_tool_call", "call_id": "call_2", "name": "g", "input": "x"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+            {"type": "message", "role": "assistant", "content": "done"},
+            {"role": "user", "content": "second turn"},
+        ]
+
+    def test_keeps_ids_after_a_reasoning_item_that_was_not_stripped(self):
+        """The id stripping stops at the next reasoning item: items paired with reasoning that is
+        still replayed intact keep their ids, as do items before any stripped reasoning."""
+        wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "deployment-a")
+        request_input = [
+            {"type": "message", "id": "msg_0", "role": "assistant", "content": "before"},
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": wrapped},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": "stripped group"},
+            {"type": "reasoning", "id": "rs_2", "summary": []},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": "intact group"},
+        ]
+
+        ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)
+
+        assert request_input == [
+            {"type": "message", "id": "msg_0", "role": "assistant", "content": "before"},
+            {"type": "message", "role": "assistant", "content": "stripped group"},
+            {"type": "reasoning", "id": "rs_2", "summary": []},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": "intact group"},
+        ]
+
+    def test_keeps_required_ids_of_built_in_tool_items(self):
+        """Built-in tool items (web_search_call, computer_call, ...) require their id as input, so
+        only item types whose id is optional are rewritten."""
+        wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "deployment-a")
+        web_search = {"type": "web_search_call", "id": "ws_1", "status": "completed"}
+        user_message_with_id = {"type": "message", "id": "msg_u", "role": "user", "content": "hi"}
+        request_input = [{"type": "reasoning", "encrypted_content": wrapped}, web_search, user_message_with_id]
+
+        ResponsesAPIRequestUtils.strip_encrypted_reasoning_from_input(request_input)
+
+        assert request_input == [web_search, user_message_with_id]
 
 
 def _cross_group_request_kwargs():

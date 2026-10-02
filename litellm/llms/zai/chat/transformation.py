@@ -7,6 +7,10 @@ from ...openai.chat.gpt_transformation import OpenAIGPTConfig
 
 ZAI_API_BASE: Final = "https://api.z.ai/api/paas/v4"
 
+_REASONING_PARAMS = ("thinking", "reasoning_effort")
+
+_ZAI_NATIVE_WEB_SEARCH_TOOL: Final = "web_search"
+
 
 class ZAIChatConfig(OpenAIGPTConfig):
     @property
@@ -34,23 +38,67 @@ class ZAIChatConfig(OpenAIGPTConfig):
         return messages, tools
 
     def get_supported_openai_params(self, model: str) -> list:
-        base_params: Final = [
-            "max_tokens",
-            "stream",
-            "stream_options",
-            "temperature",
-            "top_p",
-            "stop",
-            "tools",
-            "tool_choice",
-        ]
+        # ZAI is OpenAI-compatible, so start from the full OpenAI supported
+        # params (frequency_penalty, parallel_tool_calls, response_format,
+        # seed, n, web_search_options, ...) and add reasoning params for
+        # reasoning-capable models.
+        base_params: Final = super().get_supported_openai_params(model)
 
         import litellm
 
         try:
             if litellm.supports_reasoning(model=model, custom_llm_provider=self.custom_llm_provider):
-                base_params.append("thinking")
+                base_params.extend(_REASONING_PARAMS)
         except Exception:
             pass
 
         return base_params
+
+    def _map_web_search_options_to_native_tool(self, web_search_options: dict) -> dict:
+        """
+        Map the OpenAI-style ``web_search_options`` param to ZAI's native
+        ``{"type": "web_search", "web_search": {...}}`` chat tool.
+
+        ZAI native fields (per bigmodel.cn docs):
+        - enable (bool): turn the tool on
+        - search_query (str, optional): force a custom search query
+        - search_result (bool): return per-source search details
+        OpenAI ``web_search_options`` may carry:
+        - search_context_size ("low"/"medium"/"high")
+        - user_location
+        Only fields ZAI understands are forwarded; unknown ones are ignored.
+        """
+        native: dict = {"enable": True, "search_result": True}
+        if isinstance(web_search_options, dict):
+            forced_query: Final = web_search_options.get("search_query")
+            if isinstance(forced_query, str) and forced_query:
+                native["search_query"] = forced_query
+            search_engine: Final = web_search_options.get("search_engine")
+            if isinstance(search_engine, str) and search_engine:
+                native["search_engine"] = search_engine
+        return {"type": _ZAI_NATIVE_WEB_SEARCH_TOOL, _ZAI_NATIVE_WEB_SEARCH_TOOL: native}
+
+    def _map_openai_params(
+        self,
+        non_default_params: dict,
+        optional_params: dict,
+        model: str,
+        drop_params: bool,
+    ) -> dict:
+        supported = self.get_supported_openai_params(model)
+        for param, value in non_default_params.items():
+            if param not in supported:
+                continue
+            if param == "web_search_options":
+                # Translate to ZAI's native web_search chat tool and append it
+                # to the tools list instead of forwarding an unknown param.
+                tools_list: list = optional_params.setdefault("tools", [])
+                tools_list.append(self._map_web_search_options_to_native_tool(value or {}))
+            elif param in _REASONING_PARAMS:
+                # Responses API may pass {"effort": "high"}; extract "effort" field
+                if isinstance(value, dict):
+                    value = value.get("effort", value)
+                optional_params.setdefault("extra_body", {})[param] = value
+            else:
+                optional_params[param] = value
+        return optional_params

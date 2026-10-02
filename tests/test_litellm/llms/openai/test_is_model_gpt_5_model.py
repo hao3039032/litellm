@@ -88,6 +88,18 @@ NON_GPT5_MODELS = [
 # ---------------------------------------------------------------------------
 
 
+# gpt-6 reasoning models share the gpt-5 request semantics (max_tokens rejected by the
+# provider in favor of max_completion_tokens, reasoning_effort, Responses-bridge upgrade
+# for tools+reasoning), so they must ride the same OpenAI GPT-5 config path.
+GPT6_REASONING_MODELS = [
+    "gpt-6",
+    "gpt-6-luna",
+    "gpt-6-sol",
+    "gpt-6-astra",
+    "openai/gpt-6-luna",
+]
+
+
 class TestOpenAIGPT5ConfigIsModelGpt5Model:
 
     @pytest.mark.parametrize("model", GPT5_MODELS)
@@ -117,6 +129,14 @@ class TestOpenAIGPT5ConfigIsModelGpt5Model:
                 model
             ), f"Expected '{model}' (gpt-5-chat family) NOT to be on the GPT-5 path"
 
+    @pytest.mark.parametrize("model", GPT6_REASONING_MODELS)
+    def test_gpt6_models_are_classified_as_gpt5_path(self, model: str):
+        """gpt-6 reasoning models must ride the GPT-5 config path or litellm forwards
+        raw max_tokens (OpenAI 400s) and rejects reasoning_effort before the request
+        ever leaves the proxy."""
+        assert OpenAIGPT5Config.is_model_gpt_5_model(
+            model
+        ), f"Expected '{model}' to be classified on the GPT-5 reasoning path"
 
 # Models that are gpt-5.4 or newer. main.py gates the automatic switch to the
 # /v1/responses bridge (when reasoning_effort is set and tools are passed) on
@@ -132,6 +152,9 @@ GPT5_4_PLUS_MODELS = [
     "gpt-5.6-terra",
     "gpt-5.6-luna",
     "openai/gpt-5.6-sol",
+    "gpt-6",
+    "gpt-6-luna",
+    "gpt-6-sol",
 ]
 
 GPT5_PRE_5_4_MODELS = [

@@ -296,3 +296,40 @@ def test_zai_glm_5v_turbo_accepts_thinking(
 
     body: Final = json.loads(respx_mock.calls[0].request.content)
     assert body["thinking"] == {"type": "disabled"}
+
+
+def test_zai_reasoning_effort_uses_extra_body(local_model_cost_map: None) -> None:
+    mapped: Final = ZAIChatConfig().map_openai_params(
+        {"reasoning_effort": {"effort": "high"}},
+        {"extra_body": {"existing": True}},
+        "glm-5.3",
+        drop_params=False,
+    )
+
+    assert mapped["extra_body"] == {"existing": True, "reasoning_effort": "high"}
+    assert "reasoning_effort" not in mapped
+
+
+def test_zai_web_search_preserves_caller_tools() -> None:
+    caller_tool: Final = {"type": "function", "function": {"name": "get_weather"}}
+
+    mapped: Final = ZAIChatConfig().map_openai_params(
+        {"web_search_options": {"search_engine": "search_pro", "search_query": "litellm docs"}},
+        {"tools": [caller_tool]},
+        "glm-5.3",
+        drop_params=False,
+    )
+
+    tools: Final = mapped["tools"]
+    assert isinstance(tools, list)
+    assert tools[0] == caller_tool
+    assert tools[1] == {
+        "type": "web_search",
+        "web_search": {
+            "enable": True,
+            "search_result": True,
+            "search_engine": "search_pro",
+            "search_query": "litellm docs",
+        },
+    }
+    assert "web_search_options" not in mapped

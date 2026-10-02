@@ -3574,6 +3574,19 @@ def test_is_web_search_tool():
     }
     assert adapter._is_web_search_tool(web_search_tool_with_name) is True
 
+    # A fully formed client function tool named "web_search" (with its own
+    # input_schema, e.g. pi-web-access) must NOT be hijacked as a native
+    # server-side web search tool — the client executes it itself.
+    client_web_search_tool = {
+        "name": "web_search",
+        "description": "Search the web",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    }
+    assert adapter._is_web_search_tool(client_web_search_tool) is False
+
     # Regular function tool should not be detected
     regular_tool = {
         "name": "get_weather",
@@ -3696,6 +3709,62 @@ def test_translate_anthropic_to_openai_with_mixed_tools():
     assert openai_request["tools"][0]["function"]["name"] == "get_weather"
 
     # tool_name_mapping should be empty for short tool names
+    assert tool_name_mapping == {}
+
+
+def test_translate_anthropic_to_openai_with_client_tool_named_web_search():
+    """
+    Regression test: a client-defined function tool named "web_search" (with
+    its own input_schema, e.g. pi-web-access) must pass through to the tools
+    array as a regular function tool — NOT be converted to web_search_options.
+
+ """
+    from litellm.types.llms.anthropic import AnthropicMessagesRequest
+
+    anthropic_request = AnthropicMessagesRequest(
+        model="glm-5.3",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": "search the web for litellm docs",
+            }
+        ],
+        tools=[
+            {
+                "name": "web_search",
+                "description": "Search the web with multiple providers",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "get_weather",
+                "description": "Get weather information",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                },
+            },
+        ],
+    )
+
+    adapter = LiteLLMAnthropicMessagesAdapter()
+    openai_request, tool_name_mapping = adapter.translate_anthropic_to_openai(
+        anthropic_message_request=anthropic_request
+    )
+
+    # web_search_options must NOT be added
+    assert "web_search_options" not in openai_request
+
+    # BOTH tools must be forwarded as regular function tools
+    assert "tools" in openai_request
+    assert len(openai_request["tools"]) == 2
+    tool_names = {t["function"]["name"] for t in openai_request["tools"]}
+    assert tool_names == {"web_search", "get_weather"}
+
     assert tool_name_mapping == {}
 
 

@@ -154,6 +154,44 @@ class TestImageEditRequestUtilsDropParams:
         assert result["size"] == "1024x1024"
         assert result["quality"] == "high"
 
+    def test_openai_edit_keeps_output_format_and_compression(self):
+        """
+        Regression test: output_format/output_compression are part of the
+        OpenAI images/edits API but were missing from both the
+        ImageEditOptionalRequestParams TypedDict and the OpenAI provider's
+        supported list, so they were silently dropped instead of forwarded.
+        """
+        from litellm.llms.openai.image_edit.transformation import (
+            OpenAIImageEditConfig,
+        )
+
+        litellm.drop_params = False
+        requested: dict = {
+            "background": "transparent",
+            "input_fidelity": "high",
+            "n": 2,
+            "quality": "high",
+            "response_format": "b64_json",
+            "size": "1536x1024",
+            "user": "u1",
+            "output_format": "png",
+            "output_compression": 90,
+        }
+
+        kept: ImageEditOptionalRequestParams = (
+            ImageEditRequestUtils.get_requested_image_edit_optional_param(requested)
+        )
+        assert sorted(kept.keys()) == sorted(requested.keys())
+
+        result = ImageEditRequestUtils.get_optional_params_image_edit(
+            model="gpt-image-2",
+            image_edit_provider_config=OpenAIImageEditConfig(),
+            image_edit_optional_params=kept,
+        )
+        assert result["output_format"] == "png"
+        assert result["output_compression"] == 90
+        assert result["background"] == "transparent"
+
     def test_additional_drop_params_with_unsupported_and_drop_true(self):
         litellm.drop_params = True
         optional_params: ImageEditOptionalRequestParams = {

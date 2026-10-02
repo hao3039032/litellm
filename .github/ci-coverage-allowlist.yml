@@ -126,3 +126,8 @@ dockerfiles:
       published
     paths:
       - litellm-rust/crates/gateway/Dockerfile
+  - reason: >-
+      Fork-only patch image layered on the published litellm-database release image. It is built and
+      deployed by hand from a local context, and every runtime file it copies is covered by unit tests
+    paths:
+      - docker/Dockerfile.zai-thinking

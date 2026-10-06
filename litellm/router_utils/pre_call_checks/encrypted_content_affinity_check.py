@@ -194,6 +194,13 @@ class EncryptedContentAffinityCheck(CustomLogger):
         the latter from boundary matching and fall back to the full pool —
         i.e. trigger the exact ``invalid_encrypted_content`` failure this
         check exists to prevent.
+
+        ``api_key`` alone is a valid boundary when no ``api_base`` is set
+        (first-party OpenAI-style deployments on the provider's default base):
+        the key identifies the org that owns the encrypted content, so two
+        key-only deployments are peers iff they share the key. An unset or
+        explicitly empty base is normalized to ``""`` so it never matches a
+        deployment with a non-empty explicit base.
         """
         getter: Final = getattr(litellm_params, "get", None)
         if not callable(getter):
@@ -216,9 +223,9 @@ class EncryptedContentAffinityCheck(CustomLogger):
             if credential_values is not None and "api_key" in credential_values
             else api_key
         )
-        if not effective_api_base or not effective_api_key:
+        if not effective_api_key:
             return None
-        return (effective_api_base, effective_api_key)
+        return (effective_api_base or "", effective_api_key)
 
     def _find_deployments_on_same_encryption_boundary(
         self,

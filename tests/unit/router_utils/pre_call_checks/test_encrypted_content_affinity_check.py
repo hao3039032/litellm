@@ -1280,7 +1280,7 @@ def test_boundary_key_rejects_non_dict_like_inputs():
     for bad in (None, [], "not a dict", 42, object()):
         assert EncryptedContentAffinityCheck._encryption_boundary_key(bad) is None
 
-    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) is None
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) == ("", "k")
     assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "https://x"}) is None
 
 
@@ -2182,3 +2182,101 @@ async def test_affinity_strips_for_team_and_pattern_routes():
 
     assert result is sibling_pool
     assert not request_kwargs["input"][1].get("encrypted_content")
+
+
+def test_boundary_key_accepts_api_key_only():
+    """A first-party OpenAI-style deployment has no api_base: the key alone identifies the
+    org that owns the encrypted content. An unset base normalizes to "" so a key-only
+    deployment never matches a deployment that pins an explicit base with the same key."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    key_only = EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": "k"})
+
+    assert key_only == ("", "k")
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": None, "api_key": "k"}) == key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "", "api_key": "k"}) == key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_base": "https://x", "api_key": "k"}) != key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": "other"}) != key_only
+    assert EncryptedContentAffinityCheck._encryption_boundary_key({"api_key": ""}) is None
+
+
+def test_boundary_key_resolves_api_key_only_named_credential():
+    """Deployments that reference a key-only credential (no api_base) share a boundary
+    with every other deployment on that credential, and not with a different key."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    with patch.object(  # test-quality-ok: credential registry is the direct dependency under test
+        litellm,
+        "credential_list",
+        [
+            CredentialItem(credential_name="openai-direct", credential_values={"api_key": "key-a"}, credential_info={}),
+            CredentialItem(credential_name="openai-other", credential_values={"api_key": "key-b"}, credential_info={}),
+        ],
+    ):
+        a = EncryptedContentAffinityCheck._encryption_boundary_key({"litellm_credential_name": "openai-direct"})
+        b = EncryptedContentAffinityCheck._encryption_boundary_key({"litellm_credential_name": "openai-other"})
+
+    assert a == ("", "key-a")
+    assert b == ("", "key-b")
+
+
+@pytest.mark.asyncio
+async def test_affinity_pins_to_key_only_credential_peer_on_model_group_switch():
+    """A follow-up whose encrypted reasoning came from a key-only credential deployment in
+    another model group (e.g. luna -> sol on one OpenAI org) pins to the routed group's
+    deployment on the same credential and keeps the encrypted reasoning intact."""
+    from unittest.mock import MagicMock
+
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    originating = MagicMock()
+    originating.model_name = "gpt-5.6-luna"
+    originating.litellm_params.model_dump.return_value = {
+        "model": "openai/gpt-5.6-luna",
+        "litellm_credential_name": "openai-direct",
+    }
+    mock_router = _make_router_mock_with_cooldown(originating)
+    check = EncryptedContentAffinityCheck(router=mock_router)
+
+    same_org = {
+        "model_info": {"id": "sol-same-org"},
+        "model_name": "gpt-5.6-sol",
+        "litellm_params": {"model": "openai/gpt-5.6-sol", "litellm_credential_name": "openai-direct"},
+    }
+    other_org = {
+        "model_info": {"id": "sol-other-org"},
+        "model_name": "gpt-5.6-sol",
+        "litellm_params": {"model": "openai/gpt-5.6-sol", "litellm_credential_name": "openai-other"},
+    }
+    wrapped = ResponsesAPIRequestUtils._wrap_encrypted_content_with_model_id("gAAAAA-blob", "luna-origin")
+    request_kwargs: dict = {
+        "input": [
+            {"role": "user", "content": "hi"},
+            {"type": "reasoning", "encrypted_content": wrapped, "summary": []},
+        ],
+    }
+
+    with patch.object(  # test-quality-ok: credential registry is the direct dependency under test
+        litellm,
+        "credential_list",
+        [
+            CredentialItem(credential_name="openai-direct", credential_values={"api_key": "key-a"}, credential_info={}),
+            CredentialItem(credential_name="openai-other", credential_values={"api_key": "key-b"}, credential_info={}),
+        ],
+    ):
+        result = await check.async_filter_deployments(
+            model="gpt-5.6-sol",
+            healthy_deployments=[same_org, other_org],
+            messages=None,
+            request_kwargs=request_kwargs,
+        )
+
+    assert result == [same_org]
+    assert request_kwargs["_encrypted_content_affinity_pinned"] is True
+    assert request_kwargs["input"][1]["encrypted_content"] == wrapped

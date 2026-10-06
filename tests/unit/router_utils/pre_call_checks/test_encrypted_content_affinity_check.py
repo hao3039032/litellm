@@ -3293,3 +3293,54 @@ async def test_a_changed_named_credential_moves_the_pin_within_the_secret_manage
     assert pin_before_the_change == [peer]
     assert pin_after_the_change == [other_org]
     assert reasoning_after_the_change == _reasoning_input_minted_by("origin")[0]
+
+
+@pytest.mark.usefixtures("no_process_wide_api_base")
+@pytest.mark.asyncio
+async def test_affinity_pins_to_key_only_credential_peer_on_model_group_switch():
+    """A follow-up whose encrypted reasoning came from a key-only named-credential deployment in
+    another model group pins to the routed group's deployment on the same credential and model,
+    keeping the encrypted reasoning intact. A different credential is not a peer."""
+    from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check import (
+        EncryptedContentAffinityCheck,
+    )
+
+    credentials: Final = [
+        CredentialItem(credential_name="openai-direct", credential_values={"api_key": "key-a"}, credential_info={}),
+        CredentialItem(credential_name="openai-other", credential_values={"api_key": "key-b"}, credential_info={}),
+    ]
+    router: Final = litellm.Router(
+        model_list=[
+            {
+                "model_name": "gpt-5.6-luna",
+                "litellm_params": {"model": "openai/gpt-5.6", "litellm_credential_name": "openai-direct"},
+                "model_info": {"id": "luna-origin"},
+            },
+            {
+                "model_name": "gpt-5.6-sol",
+                "litellm_params": {"model": "openai/gpt-5.6", "litellm_credential_name": "openai-direct"},
+                "model_info": {"id": "sol-same-org"},
+            },
+            {
+                "model_name": "gpt-5.6-sol",
+                "litellm_params": {"model": "openai/gpt-5.6", "litellm_credential_name": "openai-other"},
+                "model_info": {"id": "sol-other-org"},
+            },
+        ]
+    )
+    ctx: Final = RoutingContext(router)
+    same_org: Final = _deployment_of(ctx, "sol-same-org")
+    other_org: Final = _deployment_of(ctx, "sol-other-org")
+    reasoning_input: Final = _reasoning_input_minted_by("luna-origin")
+    original_reasoning: Final = dict(reasoning_input[0])
+
+    with patch.object(litellm, "credential_list", credentials):
+        result: Final = await EncryptedContentAffinityCheck(ctx=ctx).async_filter_deployments(
+            model="gpt-5.6-sol",
+            healthy_deployments=[same_org, other_org],
+            messages=None,
+            request_kwargs={"litellm_metadata": {}, "input": reasoning_input},
+        )
+
+    assert result == [same_org]
+    assert reasoning_input[0] == original_reasoning

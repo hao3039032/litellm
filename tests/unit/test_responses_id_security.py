@@ -112,6 +112,31 @@ class TestDecryptResponseId:
             assert user_id is None
             assert team_id is None
 
+    def test_decrypt_keeps_ciphertext_that_contains_resp_marker(
+        self, responses_id_security
+    ):
+        """A single ciphertext that happens to contain ``resp_`` is not truncated."""
+        import litellm.proxy.hooks.responses_id_security as responses_module
+
+        plaintext = (
+            f"{SpecialEnums.LITELM_MANAGED_FILE_ID_PREFIX.value}"
+            ":responses_api:response_id:resp_ok;user_id:user-456;team_id:team-789"
+        )
+
+        def decrypt(value, key, **kwargs):
+            if value == "cipherresp_inside":
+                return plaintext
+            return None
+
+        with patch.object(responses_module, "decrypt_value_helper", side_effect=decrypt):
+            original_id, user_id, team_id = responses_id_security._decrypt_response_id(
+                "resp_cipherresp_inside"
+            )
+
+        assert original_id == "resp_ok"
+        assert user_id == "user-456"
+        assert team_id == "team-789"
+
 
 class TestCheckUserAccessToResponseId:
     """Test check_user_access_to_response_id function"""
@@ -1036,3 +1061,99 @@ class TestClientSuppliedRetainedIdCannotBypassAuthorization:
 
         assert result["response_id"] == "resp_strangerownprovideridcccccccc"
         assert result["response_id"] != victim_provider_id
+
+
+class TestConcatenatedPreviousResponseId:
+    """A stream that advertised two response ids makes string-merging clients send
+    ``resp_<earlier>resp_<final>`` as previous_response_id. The final id is the stored
+    response that owns the tool calls, so it is the one forwarded, and every candidate
+    still has to be a real ciphertext owned by the caller."""
+
+    _EARLY_PROVIDER_ID = "resp_earlyproviderideeeeeeeeeeeeeeeeeee"
+    _FINAL_PROVIDER_ID = "resp_finalproviderffffffffffffffffffffff"
+
+    @pytest.mark.asyncio
+    async def test_concatenated_ids_forward_the_final_response(self, mock_cache, salt_key_env):
+        hook = _hook()
+        owner = _auth()
+        joined = _issue_managed_id(hook, owner, self._EARLY_PROVIDER_ID) + _issue_managed_id(
+            hook, owner, self._FINAL_PROVIDER_ID
+        )
+        data = {"model": "gpt-fake", "previous_response_id": joined}
+
+        result = await hook.async_pre_call_hook(
+            user_api_key_dict=owner,
+            cache=mock_cache,
+            data=data,
+            call_type="aresponses",
+        )
+
+        assert result["previous_response_id"] == self._FINAL_PROVIDER_ID
+
+    @pytest.mark.asyncio
+    async def test_final_id_owned_by_someone_else_is_rejected(self, mock_cache, salt_key_env):
+        hook = _hook()
+        stranger = _auth(user_id="stranger-user", team_id="stranger-team")
+        joined = _issue_managed_id(hook, stranger, self._EARLY_PROVIDER_ID) + _issue_managed_id(
+            hook, _auth(), self._FINAL_PROVIDER_ID
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await hook.async_pre_call_hook(
+                user_api_key_dict=stranger,
+                cache=mock_cache,
+                data={"model": "gpt-fake", "previous_response_id": joined},
+                call_type="aresponses",
+            )
+
+        assert exc_info.value.status_code == 403
+        assert "not associated with" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_stranger_prefixing_a_victim_id_still_gets_their_own_final_id(self, mock_cache, salt_key_env):
+        """The victim's ciphertext sits earlier in the join, so it is never the forwarded id."""
+        hook = _hook()
+        stranger = _auth(user_id="stranger-user", team_id="stranger-team")
+        joined = _issue_managed_id(hook, _auth(), self._EARLY_PROVIDER_ID) + _issue_managed_id(
+            hook, stranger, self._FINAL_PROVIDER_ID
+        )
+        data = {"model": "gpt-fake", "previous_response_id": joined}
+
+        result = await hook.async_pre_call_hook(
+            user_api_key_dict=stranger,
+            cache=mock_cache,
+            data=data,
+            call_type="aresponses",
+        )
+
+        assert result["previous_response_id"] == self._FINAL_PROVIDER_ID
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "forged",
+        [
+            "resp_litellm_proxy:responses_api:response_id:resp_victim;user_id:stranger-user;team_id:stranger-team",
+            "resp_garbageresp_litellm_proxy:responses_api:response_id:resp_victim;"
+            "user_id:stranger-user;team_id:stranger-team",
+        ],
+    )
+    async def test_plaintext_managed_format_is_not_trusted(self, mock_cache, salt_key_env, forged):
+        """A failed decrypt must not fall back to the input, or the caller picks the owner."""
+        with pytest.raises(HTTPException) as exc_info:
+            await _hook().async_pre_call_hook(
+                user_api_key_dict=_auth(user_id="stranger-user", team_id="stranger-team"),
+                cache=mock_cache,
+                data={"model": "gpt-fake", "previous_response_id": forged},
+                call_type="aresponses",
+            )
+
+        assert exc_info.value.status_code == 403
+        assert "allow_unmanaged_response_ids" in exc_info.value.detail
+
+    def test_decrypt_attempts_are_bounded_by_marker_count(self, responses_id_security):
+        import litellm.proxy.hooks.responses_id_security as responses_module
+
+        with patch.object(responses_module, "decrypt_value_helper", return_value=None) as mock_decrypt:
+            assert not responses_id_security._is_encrypted_response_id("resp_x" * 10000)
+
+        assert mock_decrypt.call_count == responses_module._MAX_RESP_ID_CANDIDATES

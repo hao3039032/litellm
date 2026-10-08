@@ -56,6 +56,8 @@ def _proxy_signing_key() -> str | None:
 
 
 _RESPONSE_PAYLOAD_ADAPTER: Final = TypeAdapter(Mapping[str, object])
+_RESP_ID_MARKER: Final = "resp_"
+_MAX_RESP_ID_CANDIDATES: Final = 3
 
 
 def _response_payload(response_obj: object) -> Mapping[str, object] | None:
@@ -91,6 +93,46 @@ def _rewrite_advertised_id(
     rewritten: Final = {**payload, "id": rewrite(payload_id)}  # mutable-ok: pydantic cannot serialize a frozen map
     setattr(event, "response", rewritten)
     return event
+
+
+def _encrypted_payload_candidates(response_id: str) -> tuple[str, ...]:
+    """Ciphertexts after each ``resp_`` marker, last marker first.
+
+    One stream can advertise two response ids. Clients that concatenate string
+    metadata then send ``resp_<earlier>resp_<final>``. The final id is the
+    stored response. A single ciphertext may also contain the marker, so the
+    full suffix from an earlier marker is tried after the shorter one fails.
+    Only the last few markers are tried so a crafted id cannot force one
+    decrypt attempt per marker.
+    """
+
+    def marker_starts(end: int, remaining: int) -> tuple[int, ...]:
+        start: Final = response_id.rfind(_RESP_ID_MARKER, 0, end)
+        if start < 0 or remaining == 0:
+            return ()
+        return (start, *marker_starts(start, remaining - 1))
+
+    starts: Final = marker_starts(len(response_id), _MAX_RESP_ID_CANDIDATES)
+    return tuple(response_id[start + len(_RESP_ID_MARKER) :] for start in starts)
+
+
+def _managed_response_plaintext(response_id: str) -> str | None:
+    """Plaintext of the managed id, or None unless a candidate really decrypts.
+
+    Decrypt failures must not fall back to the input: a client could otherwise
+    send the managed plaintext format directly and pick any owner it likes.
+    """
+    prefix: Final = SpecialEnums.LITELM_MANAGED_FILE_ID_PREFIX.value
+    for payload in _encrypted_payload_candidates(response_id):
+        decrypted = decrypt_value_helper(
+            value=payload,
+            key="response_id",
+            exception_type="debug",
+            return_original_value=False,
+        )
+        if isinstance(decrypted, str) and decrypted.startswith(prefix):
+            return decrypted
+    return None
 
 
 def _is_responses_api_create_route(request_route: str | None) -> bool:
@@ -212,19 +254,7 @@ class ResponsesIDSecurity(CustomLogger):
         return True
 
     def _is_encrypted_response_id(self, response_id: str) -> bool:
-        split_result: Final = response_id.split("resp_")
-        if len(split_result) < 2:
-            return False
-
-        remaining_string: Final = split_result[1]
-        decrypted_value = decrypt_value_helper(value=remaining_string, key="response_id", return_original_value=True)
-
-        if decrypted_value is None:
-            return False
-
-        if decrypted_value.startswith(SpecialEnums.LITELM_MANAGED_FILE_ID_PREFIX.value):
-            return True
-        return False
+        return _managed_response_plaintext(response_id) is not None
 
     def _decrypt_response_id(self, response_id: str) -> tuple[str, str | None, str | None]:
         """
@@ -233,13 +263,7 @@ class ResponsesIDSecurity(CustomLogger):
          - user_id: the user id
          - team_id: the team id
         """
-        split_result: Final = response_id.split("resp_")
-        if len(split_result) < 2:
-            return response_id, None, None
-
-        remaining_string: Final = split_result[1]
-        decrypted_value = decrypt_value_helper(value=remaining_string, key="response_id", return_original_value=True)
-
+        decrypted_value: Final = _managed_response_plaintext(response_id)
         if decrypted_value is None:
             return response_id, None, None
 

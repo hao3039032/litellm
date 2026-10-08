@@ -20,6 +20,10 @@
 #  12) responses: once encrypted reasoning is stripped for routing, the message / function_call /
 #      custom_tool_call items that followed it are replayed without their id (OpenAI otherwise rejects
 #      them as "provided without its required 'reasoning' item")
+#  13) responses id security: a stream that advertises two response ids makes string-merging clients
+#      send resp_<earlier>resp_<final> as previous_response_id; resolve the final (stored) segment
+#      instead of the first, require candidates to genuinely decrypt under the proxy signing key,
+#      and bound decrypt attempts at three markers
 #
 # Upstream now includes (patch dropped): gpt-image optional params, gpt-6 series on the GPT-5 config
 # path (incl. cost entries), the web_search client-tool passthrough guard in the /v1/messages bridge,
@@ -70,10 +74,13 @@ COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /a
 # Patch 12: responses - drop ids of items whose paired reasoning was stripped
 COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
 
+# Patch 13: responses id security - concatenated managed ids resolve last segment first
+COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/hooks/responses_id_security.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks glm-5v-turbo etc.)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.104.0 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.104.0 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip + concatenated managed response ids resolved last segment first"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.104.0"

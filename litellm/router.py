@@ -620,6 +620,32 @@ def _responses_stream_holds_event(item: object, held_event_count: int) -> bool:
     return getattr(item, "type", None) in PRE_OUTPUT_LIFECYCLE_EVENT_TYPES
 
 
+def _is_responses_non_text_output_event(event: object) -> bool:
+    match getattr(event, "type", None):
+        case "response.output_item.added" | "response.output_item.done":
+            item: Final[object] = getattr(event, "item", None)
+            item_type: Final[object] = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            return item_type != "message"
+        case "response.content_part.added" | "response.content_part.done":
+            part: Final[object] = getattr(event, "part", None)
+            part_type: Final[object] = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            return part_type != "output_text"
+        case (
+            "response.created"
+            | "response.queued"
+            | "response.in_progress"
+            | "response.completed"
+            | "response.incomplete"
+            | "response.failed"
+            | "response.output_text.delta"
+            | "response.output_text.done"
+            | "response.output_text.annotation.added"
+        ):
+            return False
+        case _:
+            return True
+
+
 class FallbackAwareAnthropicMessagesStream:
     """
     Bare async generators can't carry the `_hidden_params` attribute the
@@ -3382,6 +3408,7 @@ class Router:
 
         async def stream_with_fallbacks():
             held_lifecycle_events: tuple[object, ...] = ()  # rebind-ok: flushed at first output, dropped on fallback
+            forwarded_non_text_output = False  # rebind-ok: latches non-text output actually yielded to the client
             try:
                 async for item in source_iterator:
                     if _responses_stream_holds_event(item, len(held_lifecycle_events)):
@@ -3390,10 +3417,20 @@ class Router:
                     for held_event in held_lifecycle_events:
                         yield held_event
                     held_lifecycle_events = ()
+                    forwarded_non_text_output = forwarded_non_text_output or _is_responses_non_text_output_event(item)
                     yield item
                 for held_event in held_lifecycle_events:
                     yield held_event
             except MidStreamFallbackError as e:
+                # Non-text output (tool calls, reasoning, refusals, argument deltas) already delivered
+                # belongs to a response the upstream never stored. Splicing a regenerated response
+                # after it leaves the client holding tool calls no stored response contains, so its
+                # next turn fails with "No tool call found"; surface the error instead. Text-only
+                # partials keep the continuation fallback below.
+                if forwarded_non_text_output:
+                    if e.original_exception is not None:
+                        raise e.original_exception from e
+                    raise
                 async with contextlib.aclosing(
                     self._aresponses_fallback_attempt(
                         e, source_iterator, initial_kwargs, wrapper.adopt_fallback_headers, held_lifecycle_events

@@ -1396,3 +1396,370 @@ async def test_aresponses_client_error_event_skips_fallback():
 
     assert exc_info.value.status_code == 400
     mock_fallback.assert_not_awaited()
+
+
+# -------- non-text output delivered before a mid-stream error must not splice a fallback --------
+
+
+def _sse_response_replaying(events: tuple[dict[str, Any], ...]):
+    """Mock httpx-style response whose byte stream replays `events` as sequence-numbered SSE frames."""
+    import json
+    from unittest.mock import Mock
+
+    payload = b"".join(
+        f"data: {json.dumps({**event, 'sequence_number': index})}\n\n".encode()
+        for index, event in enumerate(events)
+    )
+
+    async def mock_aiter_bytes() -> AsyncIterator[bytes]:
+        yield payload
+
+    mock_response = Mock()
+    mock_response.headers = {}
+    mock_response.aiter_bytes = mock_aiter_bytes
+    return mock_response
+
+
+async def _wrapped_sse_stream(router: Router, sse_events: tuple[dict[str, Any], ...], initial_kwargs: dict):
+    """Drive Router._aresponses_streaming_iterator over a real SSE byte stream parsed by the real
+    OpenAIResponsesAPIConfig, so the guard sees the same typed events production yields."""
+    from unittest.mock import MagicMock
+
+    from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+    from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
+    from litellm.responses.streaming_iterator import ResponsesAPIStreamingIterator
+
+    mock_logging_obj = MagicMock(spec=LiteLLMLoggingObj)
+    mock_logging_obj.model_call_details = {"litellm_params": {}}
+    mock_logging_obj.completion_start_time = None
+    source = ResponsesAPIStreamingIterator(
+        response=_sse_response_replaying(sse_events),
+        model="gpt-5",
+        responses_api_provider_config=OpenAIResponsesAPIConfig(),
+        logging_obj=mock_logging_obj,
+        custom_llm_provider="openai",
+    )
+    return await router._aresponses_streaming_iterator(response=source, initial_kwargs=initial_kwargs)
+
+
+class _SingleEventFallbackStream:
+    """Async iterator standing in for the fallback chain's stream: yields exactly one event."""
+
+    def __init__(self, event: object) -> None:
+        self._event = event
+        self._done = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._done:
+            raise StopAsyncIteration
+        self._done = True
+        return self._event
+
+
+_RETRIABLE_SERVER_ERROR_FRAME: dict[str, Any] = {
+    "type": "error",
+    "error": {"type": "server_error", "code": "server_error", "message": "upstream failed"},
+}
+
+
+@pytest.mark.parametrize(
+    "output_event",
+    (
+        pytest.param(
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_first",
+                    "call_id": "call_first",
+                    "name": "write_todos",
+                    "arguments": "",
+                    "status": "in_progress",
+                },
+            },
+            id="function-call-added",
+        ),
+        pytest.param(
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_first",
+                    "call_id": "call_first",
+                    "name": "write_todos",
+                    "arguments": "{}",
+                    "status": "completed",
+                },
+            },
+            id="function-call-done",
+        ),
+        pytest.param(
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "reasoning", "id": "rs_first", "summary": []},
+            },
+            id="reasoning-item",
+        ),
+        pytest.param(
+            {
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "item_id": "fc_first",
+                "delta": '{"task":',
+            },
+            id="function-call-arguments",
+        ),
+        pytest.param(
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "output_index": 0,
+                "item_id": "rs_first",
+                "summary_index": 0,
+                "delta": "Planning the next step",
+            },
+            id="reasoning-summary",
+        ),
+        pytest.param(
+            {
+                "type": "response.content_part.added",
+                "output_index": 0,
+                "item_id": "msg_first",
+                "content_index": 0,
+                "part": {"type": "refusal", "refusal": "Cannot comply"},
+            },
+            id="refusal-part",
+        ),
+        pytest.param(
+            {
+                "type": "response.custom_tool_call_input.delta",
+                "output_index": 0,
+                "item_id": "custom_first",
+                "delta": "print(",
+            },
+            id="custom-tool-input",
+        ),
+    ),
+)
+@pytest.mark.parametrize("text_position", ("none", "before", "after"))
+@pytest.mark.asyncio
+async def test_aresponses_error_after_non_text_output_surfaces_instead_of_splicing(
+    output_event: dict[str, Any], text_position: str
+):
+    """Non-text output (tool calls, reasoning, refusals, argument deltas) already delivered belongs
+    to a response the upstream never stored, so a mid-stream error must surface instead of splicing
+    a regenerated response: every non-text shape latches the guard, with or without text around it."""
+    import litellm
+
+    router = _make_router()
+    text_event: dict[str, Any] = {
+        "type": "response.output_text.delta",
+        "output_index": 1,
+        "item_id": "msg_first",
+        "content_index": 0,
+        "delta": "Let me check",
+    }
+    partial_events = (
+        *((text_event,) if text_position == "before" else ()),
+        output_event,
+        *((text_event,) if text_position == "after" else ()),
+    )
+    sse_events = (
+        {
+            "type": "response.created",
+            "response": {"id": "resp_first", "object": "response", "status": "in_progress", "output": []},
+        },
+        *partial_events,
+        _RETRIABLE_SERVER_ERROR_FRAME,
+    )
+
+    with patch.object(router, "async_function_with_fallbacks_common_utils", new=AsyncMock()) as mock_fallback:
+        wrapped = await _wrapped_sse_stream(router, sse_events, {"model": "primary", "input": "original question"})
+        delivered = [await anext(wrapped) for _ in sse_events[:-1]]
+        with pytest.raises(litellm.InternalServerError) as exc_info:
+            await anext(wrapped)
+
+    mock_fallback.assert_not_awaited()
+    assert tuple(event.type for event in delivered) == tuple(event["type"] for event in sse_events[:-1])
+    assert exc_info.value.status_code >= 500
+
+
+@pytest.mark.asyncio
+async def test_aresponses_message_shell_with_text_still_falls_back_with_continuation():
+    """A message output item and its output_text parts are text output, not non-text: the mid-stream
+    error must still take the continuation fallback, whose re-entry carries the partial assistant text."""
+    router = _make_router()
+    message: dict[str, Any] = {"type": "message", "id": "msg_first", "role": "assistant", "content": []}
+    text_part: dict[str, Any] = {"type": "output_text", "text": "partial answer", "annotations": []}
+    part_location: dict[str, Any] = {"item_id": "msg_first", "output_index": 0, "content_index": 0}
+    sse_events = (
+        {
+            "type": "response.created",
+            "response": {"id": "resp_first", "object": "response", "status": "in_progress", "output": []},
+        },
+        {"type": "response.output_item.added", "output_index": 0, "item": {**message, "status": "in_progress"}},
+        {"type": "response.content_part.added", **part_location, "part": {**text_part, "text": ""}},
+        {"type": "response.output_text.delta", **part_location, "delta": "partial answer"},
+        {"type": "response.output_text.done", **part_location, "text": "partial answer"},
+        {"type": "response.content_part.done", **part_location, "part": text_part},
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {**message, "status": "completed", "content": [text_part]},
+        },
+        _RETRIABLE_SERVER_ERROR_FRAME,
+    )
+    fallback_event = _make_completed_event(1, 1, 2)
+
+    with patch.object(
+        router,
+        "async_function_with_fallbacks_common_utils",
+        new=AsyncMock(return_value=_SingleEventFallbackStream(fallback_event)),
+    ) as mock_fallback:
+        collected = [
+            event
+            async for event in await _wrapped_sse_stream(
+                router, sse_events, {"model": "primary", "input": "original question"}
+            )
+        ]
+
+    mock_fallback.assert_awaited_once()
+    assert collected[-1] == fallback_event
+    assert tuple(event.type for event in collected[:-1]) == tuple(event["type"] for event in sse_events[:-1])
+    continuation = mock_fallback.await_args.kwargs["kwargs"]["input"]
+    assert continuation[0]["content"][0]["text"] == "original question"
+    assert continuation[-1]["content"][0]["text"] == "partial answer"
+
+
+@pytest.mark.asyncio
+async def test_aresponses_non_text_output_error_without_original_exception_reraises_itself():
+    """A MidStreamFallbackError raised by the source iterator with no original exception after
+    non-text output re-raises itself: there is no underlying error to surface and no safe splice."""
+    from litellm.exceptions import MidStreamFallbackError
+    from litellm.types.llms.openai import BaseLiteLLMOpenAIResponseObject, OutputItemAddedEvent
+
+    router = _make_router()
+    stream_error = MidStreamFallbackError(
+        message="upstream failed",
+        model="primary",
+        llm_provider="openai",
+        original_exception=None,
+        generated_content="",
+        is_pre_first_chunk=False,
+    )
+    function_call_event = OutputItemAddedEvent(
+        type=ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED,
+        output_index=0,
+        item=BaseLiteLLMOpenAIResponseObject(type="function_call", call_id="call_first", name="lookup", arguments=""),
+    )
+
+    async def source() -> AsyncIterator[OutputItemAddedEvent]:
+        yield function_call_event
+        raise stream_error
+
+    with patch.object(router, "async_function_with_fallbacks_common_utils", new=AsyncMock()) as mock_fallback:
+        wrapped = await router._aresponses_streaming_iterator(
+            response=source(), initial_kwargs={"model": "primary", "input": "original question"}
+        )
+        assert await anext(wrapped) is function_call_event
+        with pytest.raises(MidStreamFallbackError) as exc_info:
+            await anext(wrapped)
+
+    assert exc_info.value is stream_error
+    mock_fallback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aresponses_text_partial_still_falls_back_with_continuation():
+    """Pure text output keeps the upstream continuation fallback: the error does not surface and the
+    fallback re-entry carries the partial assistant text."""
+    router = _make_router()
+    sse_events = (
+        {
+            "type": "response.created",
+            "response": {"id": "resp_first", "object": "response", "status": "in_progress", "output": []},
+        },
+        {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "partial answer"},
+        _RETRIABLE_SERVER_ERROR_FRAME,
+    )
+    fallback_event = _make_completed_event(1, 1, 2)
+
+    with patch.object(
+        router,
+        "async_function_with_fallbacks_common_utils",
+        new=AsyncMock(return_value=_SingleEventFallbackStream(fallback_event)),
+    ) as mock_fallback:
+        collected = [
+            event
+            async for event in await _wrapped_sse_stream(
+                router, sse_events, {"model": "primary", "input": "original question"}
+            )
+        ]
+
+    assert collected[-1] == fallback_event
+    mock_fallback.assert_awaited_once()
+    continuation = mock_fallback.await_args.kwargs["kwargs"]["input"]
+    assert continuation[-1]["content"][0]["text"] == "partial answer"
+
+
+@pytest.mark.asyncio
+async def test_aresponses_queued_then_text_still_falls_back():
+    """A held response.queued announcement flushed ahead of text output is lifecycle-only, so the
+    continuation fallback still runs and the client still sees exactly one completed response."""
+    router = _make_router()
+    sse_events = (
+        {
+            "type": "response.queued",
+            "response": {"id": "resp_first", "object": "response", "status": "queued", "output": []},
+        },
+        {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "partial"},
+        _RETRIABLE_SERVER_ERROR_FRAME,
+    )
+    fallback_event = _make_completed_event(1, 1, 2)
+
+    with patch.object(
+        router,
+        "async_function_with_fallbacks_common_utils",
+        new=AsyncMock(return_value=_SingleEventFallbackStream(fallback_event)),
+    ) as mock_fallback:
+        collected = [
+            event async for event in await _wrapped_sse_stream(router, sse_events, {"model": "primary", "input": "q"})
+        ]
+
+    assert collected[-1] == fallback_event
+    mock_fallback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_aresponses_lifecycle_only_error_still_falls_back():
+    """Only held lifecycle events (no output of any kind) keep the plain upstream fallback."""
+    router = _make_router()
+    sse_events = (
+        {
+            "type": "response.created",
+            "response": {"id": "resp_first", "object": "response", "status": "in_progress", "output": []},
+        },
+        {
+            "type": "response.in_progress",
+            "response": {"id": "resp_first", "object": "response", "status": "in_progress", "output": []},
+        },
+        _RETRIABLE_SERVER_ERROR_FRAME,
+    )
+    fallback_event = _make_completed_event(1, 1, 2)
+
+    with patch.object(
+        router,
+        "async_function_with_fallbacks_common_utils",
+        new=AsyncMock(return_value=_SingleEventFallbackStream(fallback_event)),
+    ) as mock_fallback:
+        collected = [
+            event async for event in await _wrapped_sse_stream(router, sse_events, {"model": "primary", "input": "q"})
+        ]
+
+    assert collected == [fallback_event]
+    mock_fallback.assert_awaited_once()

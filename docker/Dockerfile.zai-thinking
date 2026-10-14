@@ -27,6 +27,8 @@
 #      and bound decrypt attempts at three markers
 #  14) registry read-through: queued misses behind a successful resync no longer spend the resync
 #      budget (backport of #44277, not on upstream v1.105.1)
+#  15) router responses fallback: surface the mid-stream error instead of splicing a regenerated
+#      response after non-text output (tool calls, reasoning, refusals) was already forwarded
 #
 # Upstream 1.105.1 also includes (patch dropped): gpt-image optional params, gpt-6 series on the GPT-5
 # config path (incl. cost entries), the web_search client-tool passthrough guard in the /v1/messages
@@ -84,10 +86,13 @@ COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site
 # Patch 14: registry read-through - queued misses spend no resync budget (#44277)
 COPY litellm/proxy/common_utils/registry_read_through.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/common_utils/registry_read_through.py
 
+# Patch 15: router responses fallback splice guard after forwarded non-text output
+COPY litellm/router.py /app/.venv/lib/python3.13/site-packages/litellm/router.py
+
 # Force litellm to use local backup (skip upstream raw fetch which lacks glm-5v-turbo etc.)
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.105.1 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI and OpenCode UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip + concatenated managed response ids resolved last segment first + registry read-through resync-budget fix"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.105.1 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI and OpenCode UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip + concatenated managed response ids resolved last segment first + registry read-through resync-budget fix + responses fallback splice guard after forwarded non-text output"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"
 LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.105.1"

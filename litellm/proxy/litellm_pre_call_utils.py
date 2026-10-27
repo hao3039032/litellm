@@ -3666,9 +3666,11 @@ def _add_client_user_agent_to_request(data: dict, request: Request) -> None:
         return
     if request is None or not getattr(request, "headers", None):
         return
-    client_ua = request.headers.get("user-agent")
+    client_ua: Final = request.headers.get("user-agent")
     if not client_ua:
         return
-    _extra_headers = data.setdefault("extra_headers", {})
+    if data.get("extra_headers") is None:
+        data["extra_headers"] = {}  # rebind-ok: request data is the pre-call pipeline's out-param
+    _extra_headers: Final = data["extra_headers"]
     if "User-Agent" not in _extra_headers and "user-agent" not in _extra_headers:
         _extra_headers["User-Agent"] = client_ua

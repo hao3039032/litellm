@@ -8912,6 +8912,7 @@ class ProviderConfigManager:
 
     _get_bedrock_mantle_config = get_bedrock_mantle_config
 
+    @staticmethod
     def _get_opencode_config(model: str, provider: LlmProviders) -> BaseConfig:
         """Pick the wire format OpenCode serves this model on."""
         from litellm.llms.opencode.common_utils import opencode_endpoint_for_model

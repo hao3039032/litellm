@@ -9045,41 +9045,61 @@ def test_arize_otlp_protocol_on_a_key_logging_entry_reaches_the_destination(monk
         assert destinations[0].endpoint == "https://arize.internal.example/v1/traces"
     finally:
         is_otel_v2_enabled.cache_clear()
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "flag_on, env_static_ua, client_ua_header, expected_ua",
-    [
-        (True, None, "my-test-client/1.0", "my-test-client/1.0"),
-        (True, "static-override/9.9", "my-test-client/1.0", None),
-        (True, None, None, None),
-        (False, None, "my-test-client/1.0", None),
-    ],
-)
-async def test_add_client_user_agent_to_request(flag_on, env_static_ua, client_ua_header, expected_ua, monkeypatch):
-    """The inbound client User-Agent reaches ``data["extra_headers"]`` only when
-    the forward flag is on and no static ``LITELLM_USER_AGENT`` override is set.
-    A missing client UA leaves the upstream default untouched (no UA injected),
-    and the flag off preserves the pre-feature behavior of never injecting.
-    """
-    headers = {"Content-Type": "application/json"}
-    if client_ua_header is not None:
-        headers["user-agent"] = client_ua_header
-    request = _make_request_mock("/v1/chat/completions", headers)
 
+
+@pytest.mark.parametrize(
+    "flag_on, env_static_ua, client_ua_header, initial_data, expected_data",
+    (
+        (True, None, "client/1.0", {}, {"extra_headers": {"User-Agent": "client/1.0"}}),
+        (True, "static/9.9", "client/1.0", {}, {}),
+        (True, None, None, {}, {}),
+        (False, None, "client/1.0", {}, {}),
+        (True, None, "client/1.0", {"extra_headers": None}, {"extra_headers": {"User-Agent": "client/1.0"}}),
+        (True, "static/9.9", "client/1.0", {"extra_headers": None}, {"extra_headers": None}),
+        (True, None, None, {"extra_headers": None}, {"extra_headers": None}),
+        (False, None, "client/1.0", {"extra_headers": None}, {"extra_headers": None}),
+        (True, None, "client/1.0", {"extra_headers": {}}, {"extra_headers": {"User-Agent": "client/1.0"}}),
+        (
+            True,
+            None,
+            "client/1.0",
+            {"extra_headers": {"X-Test": "preserved"}},
+            {"extra_headers": {"X-Test": "preserved", "User-Agent": "client/1.0"}},
+        ),
+        (
+            True,
+            None,
+            "client/1.0",
+            {"extra_headers": {"User-Agent": "explicit/2.0", "X-Test": "preserved"}},
+            {"extra_headers": {"User-Agent": "explicit/2.0", "X-Test": "preserved"}},
+        ),
+        (
+            True,
+            None,
+            "client/1.0",
+            {"extra_headers": {"user-agent": "explicit/2.0", "X-Test": "preserved"}},
+            {"extra_headers": {"user-agent": "explicit/2.0", "X-Test": "preserved"}},
+        ),
+    ),
+)
+def test_add_client_user_agent_to_request(
+    flag_on: bool,
+    env_static_ua: str | None,
+    client_ua_header: str | None,
+    initial_data: dict[str, object],
+    expected_data: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request: Final = Request(
+        {"type": "http", "headers": [] if client_ua_header is None else [(b"user-agent", client_ua_header.encode())]}
+    )
     if env_static_ua is None:
         monkeypatch.delenv("LITELLM_USER_AGENT", raising=False)
     else:
         monkeypatch.setenv("LITELLM_USER_AGENT", env_static_ua)
-    monkeypatch.setattr(
-        litellm,
-        "forward_client_user_agent_to_llm_provider",
-        flag_on,
-    )
+    monkeypatch.setattr(litellm, "forward_client_user_agent_to_llm_provider", flag_on)
+    data: Final = copy.deepcopy(initial_data)
 
-    data: dict = {}
     _add_client_user_agent_to_request(data=data, request=request)
 
-    if expected_ua is None:
-        assert "extra_headers" not in data or "User-Agent" not in data.get("extra_headers", {})
-    else:
-        assert data["extra_headers"]["User-Agent"] == expected_ua
+    assert data == expected_data

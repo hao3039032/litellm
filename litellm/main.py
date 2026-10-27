@@ -2194,7 +2194,7 @@ def _complete_groq(ctx: CompletionDispatchContext) -> _CompletionDispatchResult:
     )
 
 
-def _complete_opencode(ctx: _CompletionDispatchContext) -> _CompletionDispatchResult:
+def _complete_opencode(ctx: CompletionDispatchContext) -> _CompletionDispatchResult:
     acompletion: Final = ctx.acompletion
     api_base: Final = ctx.api_base
     api_key: Final = ctx.api_key

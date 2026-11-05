@@ -4,6 +4,7 @@ Tests for Z.AI (Zhipu AI) provider - GLM models
 
 import json
 import math
+from typing import Final
 
 import pytest
 
@@ -437,6 +438,32 @@ class TestZaiWebSearchOptionsMapping:
         assert native_tool["web_search"]["search_result"] is True
         # existing function tools are untouched
         assert result["tools"][0]["function"]["name"] == "get_weather"
+
+    @pytest.mark.parametrize("tools_in_optional_params", (False, True))
+    def test_web_search_options_does_not_mutate_reused_tools(self, tools_in_optional_params: bool) -> None:
+        from litellm.llms.zai.chat.transformation import ZAIChatConfig
+
+        config: Final = ZAIChatConfig()
+        function_tool: Final = {"type": "function", "function": {"name": "get_weather"}}
+        tools: Final = [function_tool]
+        expected_tools: Final = [
+            function_tool,
+            {"type": "web_search", "web_search": {"enable": True, "search_result": True}},
+        ]
+        for _ in range(2):
+            optional_params: Final = {"temperature": 0.5, **({"tools": tools} if tools_in_optional_params else {})}
+            result: Final = config._map_openai_params(
+                non_default_params={
+                    **({} if tools_in_optional_params else {"tools": tools}),
+                    "web_search_options": {},
+                },
+                optional_params=optional_params,
+                model="glm-5.3",
+                drop_params=False,
+            )
+            assert result is optional_params
+            assert result == {"temperature": 0.5, "tools": expected_tools}
+        assert tools == [function_tool]
 
     def test_web_search_options_forwards_known_fields(self):
         from litellm.llms.zai.chat.transformation import ZAIChatConfig

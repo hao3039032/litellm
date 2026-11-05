@@ -10263,3 +10263,18 @@ def test_add_client_user_agent_to_request(
     _add_client_user_agent_to_request(data=data, request=request)
 
     assert data == expected_data
+
+
+@pytest.mark.parametrize("header_name", ("User-Agent", "user-agent", "USER-AGENT", "uSeR-aGeNt"))
+@pytest.mark.parametrize("header_value", ("explicit/2.0", ""))
+def test_add_client_user_agent_preserves_explicit_header_case_insensitively(
+    header_name: str, header_value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LITELLM_USER_AGENT", raising=False)
+    monkeypatch.setattr(litellm, "forward_client_user_agent_to_llm_provider", True)
+    request: Final = Request({"type": "http", "headers": [(b"user-agent", b"client/1.0")]})
+    data: Final = {"extra_headers": {header_name: header_value, "X-Test": "preserved"}}
+
+    _add_client_user_agent_to_request(data=data, request=request)
+
+    assert data == {"extra_headers": {header_name: header_value, "X-Test": "preserved"}}

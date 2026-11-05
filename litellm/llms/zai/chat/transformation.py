@@ -99,8 +99,10 @@ class ZAIChatConfig(OpenAIGPTConfig):
             if param == "web_search_options":
                 # Translate to ZAI's native web_search chat tool and append it
                 # to the tools list instead of forwarding an unknown param.
-                tools_list: list = optional_params.setdefault("tools", [])
-                tools_list.append(self._map_web_search_options_to_native_tool(value or {}))
+                optional_params["tools"] = [
+                    *optional_params.get("tools", []),
+                    self._map_web_search_options_to_native_tool(value or {}),
+                ]
             elif param in _REASONING_PARAMS:
                 # Responses API may pass {"effort": "high"}; extract "effort" field
                 if isinstance(value, dict):

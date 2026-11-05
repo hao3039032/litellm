@@ -1,12 +1,12 @@
-# Minimal patch image based on upstream v1.106.4 release.
+# Minimal patch image based on upstream v1.108.0 release.
 # Applies file patches for zai GLM + reasoning routing + UI registration + client UA forwarding + OpenCode.
-# Upstream 1.106.4 already ships most of what earlier patch images carried; these patches only add what 1.106.4 lacks:
+# Upstream 1.108.0 still ships none of the patches below; the list only adds what upstream lacks:
 #   0) socksio + aiohttp-socks so outbound proxies configured via HTTP(S)_PROXY can use socks:// URLs
 #   1) zai transformation: route thinking/reasoning_effort into extra_body; web_search_options maps to
 #      GLM's native {"type":"web_search"} chat tool
 #   2) backup model cost map: add zai/glm-5v-turbo + zai/glm-5.3-flashx + the glm-4.5-family
 #      supports_reasoning flags + OpenCode entries
-#      (upstream 1.106.4 has the zai/glm-5 family plus tencent/novita/aihubmix variants of these
+#      (upstream 1.108.0 has the zai/glm-5 family plus tencent/novita/aihubmix variants of these
 #      models, but not the zai/ entries themselves)
 #   3) force local backup usage so the entries above resolve without a remote map fetch
 #   4) provider_create_fields.json: register ZAI (+ OPENCODE / OPENCODE_GO) in the Add Model UI
@@ -29,11 +29,14 @@
 #  14) router responses fallback: surface the mid-stream error instead of splicing a regenerated
 #      response after non-text output (tool calls, reasoning, refusals) was already forwarded
 #
-# Upstream 1.106.4 also includes (patch dropped): the registry read-through resync-budget fix
-# (#44277, previously patch 14), gpt-image optional params, gpt-6 series on the GPT-5 config path,
+# Upstream 1.108.0 also includes (unchanged from 1.106.4): the registry read-through resync-budget fix
+# (#44277), gpt-image optional params, gpt-6 series on the GPT-5 config path,
 # the web_search client-tool passthrough guard in the /v1/messages bridge, credential-backed
 # encryption boundaries, strip-and-dispatch for unavailable origins, and stdio MCP gating.
-FROM ghcr.io/berriai/litellm-database:v1.106.4@sha256:db36453d25e76c9eb689d7d51b8e5fa48843243d7a86ed1284cf574ce0107b3f
+# Image generation dispatch moved upstream to litellm/images/main.py in 1.108; the
+# extra_headers body-leak fix stays because add_provider_specific_params_to_optional_params
+# still forwards unknown keys into extra_body on the shared param path.
+FROM ghcr.io/berriai/litellm-database:v1.108.0@sha256:80c91fd00cc039e8880474f539544b919f14cd258a22f22ce4218b864c4ff14a
 
 RUN /app/.venv/bin/python -m ensurepip \
     && /app/.venv/bin/python -m pip install --no-cache-dir socksio==1.0.0 aiohttp-socks==0.12.0
@@ -89,6 +92,6 @@ COPY litellm/router.py /app/.venv/lib/python3.13/site-packages/litellm/router.py
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.106.4 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI and OpenCode UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip + concatenated managed response ids resolved last segment first + responses fallback splice guard after forwarded non-text output"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.108.0 with socks proxy support + reasoning extra_body routing + zai native web_search tool + zai/glm-5v-turbo + glm-5.3-flashx cost entries + ZAI and OpenCode UI registration + client UA forwarding + OpenCode Zen/Go providers + image edits output_format/output_compression + strip_images hook + image generation extra_headers body-leak fix + nested null image usage fix + key-only encrypted_content boundary + orphaned item ids dropped after reasoning strip + concatenated managed response ids resolved last segment first + responses fallback splice guard after forwarded non-text output"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"
-LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.106.4"
+LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.108.0"

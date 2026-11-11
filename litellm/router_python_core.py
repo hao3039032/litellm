@@ -3370,7 +3370,7 @@ class PythonCore(DeprecatedRouterMembers):
 
     def print_deployment(self, deployment: dict):
         """
-        returns a copy of the deployment with the api key masked
+        Returns a copy of the deployment with the api key masked
 
         Only returns 2 characters of the api key and masks the rest with * (10 *).
         """
@@ -5720,7 +5720,7 @@ class PythonCore(DeprecatedRouterMembers):
         **kwargs,
     ):
         """
-        model - List of comma-separated model names. E.g. model="gpt-4, gpt-3.5-turbo"
+        Model - List of comma-separated model names. E.g. model="gpt-4, gpt-3.5-turbo"
 
         Returns fastest response from list of model names. OpenAI-compatible endpoint.
         """
@@ -13637,7 +13637,7 @@ class PythonCore(DeprecatedRouterMembers):
 
     def _core_get_model_ids(self, model_name: str | None = None, exclude_team_models: bool = False) -> list[str]:
         """
-        if 'model_name' is none, returns all.
+        If 'model_name' is none, returns all.
 
         Returns list of model id's.
 

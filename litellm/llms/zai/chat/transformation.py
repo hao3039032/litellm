@@ -134,7 +134,10 @@ class ZAIChatConfig(OpenAIGPTConfig):
         current_extra_body: Final = optional_params.get("extra_body")
         extra_body: Final = current_extra_body if _is_json_object(current_extra_body) else {}
         current_tools: Final = optional_params.get("tools")
-        caller_tools: Final = current_tools if isinstance(current_tools, list) else []
+        sent_tools: Final = sent.get("tools")
+        caller_tools: Final = (
+            current_tools if isinstance(current_tools, list) else sent_tools if isinstance(sent_tools, list) else []
+        )
         passthrough_params: Final = TOKEN_LIMIT_PARAMS | REASONING_PARAMS | frozenset({"web_search_options"})
         return {
             **optional_params,

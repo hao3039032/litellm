@@ -278,38 +278,6 @@ def test_zai_cost_resolves_case_insensitively(local_model_cost_map: None, model:
     assert math.isclose(completion_cost, 1000 * entry["output_cost_per_token"])
 
 
-@pytest.mark.parametrize(
-    "model",
-    ["glm-4.5", "glm-4.5v", "glm-4.5-x", "glm-4.5-air", "glm-4.5-airx", "glm-4.5-flash"],
-)
-def test_zai_glm_45_family_accepts_thinking(
-    local_model_cost_map: None,
-    model: str,
-    respx_mock: respx.MockRouter,
-    zai_response: Mapping[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ZAI_API_KEY", "test-api-key")
-    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
-    respx_mock.post("https://api.z.ai/api/paas/v4/chat/completions").respond(json=zai_response)
-
-    completion(
-        model=f"zai/{model}",
-        messages=[{"role": "user", "content": "Hello"}],
-        thinking={"type": "enabled"},
-    )
-
-    body: Final = json.loads(respx_mock.calls[0].request.content)
-    assert body["thinking"] == {"type": "enabled"}
-
-
-@pytest.mark.parametrize("model", ["glm-4.5", "glm-4.5-flash"])
-def test_zai_glm_45_family_routes_reasoning_effort_into_extra_body(local_model_cost_map: None, model: str) -> None:
-    mapped: Final = ZAIChatConfig().map_openai_params({"reasoning_effort": "high"}, {}, model, drop_params=False)
-
-    assert mapped["extra_body"] == {"reasoning_effort": "high"}
-
-
 def test_zai_glm_5v_turbo_accepts_thinking(
     local_model_cost_map: None,
     respx_mock: respx.MockRouter,

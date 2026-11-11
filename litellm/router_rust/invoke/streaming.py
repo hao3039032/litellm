@@ -1471,6 +1471,32 @@ def _responses_stream_holds_event(item: object, held_event_count: int) -> bool:
     return getattr(item, "type", None) in PRE_OUTPUT_LIFECYCLE_EVENT_TYPES
 
 
+def _is_responses_non_text_output_event(event: object) -> bool:
+    match getattr(event, "type", None):
+        case "response.output_item.added" | "response.output_item.done":
+            item: Final[object] = getattr(event, "item", None)
+            item_type: Final[object] = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            return item_type != "message"
+        case "response.content_part.added" | "response.content_part.done":
+            part: Final[object] = getattr(event, "part", None)
+            part_type: Final[object] = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            return part_type != "output_text"
+        case (
+            "response.created"
+            | "response.queued"
+            | "response.in_progress"
+            | "response.completed"
+            | "response.incomplete"
+            | "response.failed"
+            | "response.output_text.delta"
+            | "response.output_text.done"
+            | "response.output_text.annotation.added"
+        ):
+            return False
+        case _:
+            return True
+
+
 def _responses_event_announces_background_run(item: object) -> bool:
     return getattr(getattr(item, "response", None), "background", None) is True
 
@@ -1661,6 +1687,7 @@ def wrap_responses_stream(  # noqa: C901  # one function per Python wrapper it p
         held: tuple[object, ...] = ()  # rebind-ok: flushed at first output, dropped on fallback
         response_id_exposed = False  # rebind-ok: set once, before an early-released event is yielded
         output_started = False  # rebind-ok: set at the first event that is not held
+        forwarded_non_text_output = False  # rebind-ok: latches non-text output actually yielded to the client
         try:
             async for item in _areported(
                 attempt,
@@ -1676,6 +1703,7 @@ def wrap_responses_stream(  # noqa: C901  # one function per Python wrapper it p
                     yield held_event
                 held = ()
                 output_started = True
+                forwarded_non_text_output = forwarded_non_text_output or _is_responses_non_text_output_event(item)
                 yield item
             for held_event in held:
                 yield held_event
@@ -1692,6 +1720,8 @@ def wrap_responses_stream(  # noqa: C901  # one function per Python wrapper it p
             )
             if response_id_exposed:
                 _raise_released_stream_error(attempt, e)
+            if forwarded_non_text_output:
+                _raise_original_mid_stream_error(e)
             async with contextlib.aclosing(
                 _responses_recover_stream_error(
                     attempt, e, source_iterator, wrapper, wrapper.adopt_fallback_headers, held, output_started

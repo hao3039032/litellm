@@ -56139,7 +56139,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -56151,7 +56150,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "supports_vision": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
@@ -56164,7 +56162,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -56176,7 +56173,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -56188,7 +56184,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },
@@ -56211,7 +56206,6 @@
         "max_output_tokens": 32000,
         "mode": "chat",
         "supports_function_calling": true,
-        "supports_reasoning": true,
         "supports_tool_choice": true,
         "source": "https://docs.z.ai/guides/overview/pricing"
     },

@@ -1091,6 +1091,32 @@ def _responses_stream_holds_event(item: object, held_event_count: int) -> bool:
     return getattr(item, "type", None) in PRE_OUTPUT_LIFECYCLE_EVENT_TYPES
 
 
+def _is_responses_non_text_output_event(event: object) -> bool:
+    match getattr(event, "type", None):
+        case "response.output_item.added" | "response.output_item.done":
+            item: Final[object] = getattr(event, "item", None)
+            item_type: Final[object] = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            return item_type != "message"
+        case "response.content_part.added" | "response.content_part.done":
+            part: Final[object] = getattr(event, "part", None)
+            part_type: Final[object] = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            return part_type != "output_text"
+        case (
+            "response.created"
+            | "response.queued"
+            | "response.in_progress"
+            | "response.completed"
+            | "response.incomplete"
+            | "response.failed"
+            | "response.output_text.delta"
+            | "response.output_text.done"
+            | "response.output_text.annotation.added"
+        ):
+            return False
+        case _:
+            return True
+
+
 def _responses_event_announces_background_run(item: object) -> bool:
     return getattr(getattr(item, "response", None), "background", None) is True
 
@@ -4506,6 +4532,7 @@ class PythonCore(DeprecatedRouterMembers):
         async def stream_with_fallbacks():
             held_lifecycle_events: tuple[object, ...] = ()  # rebind-ok: flushed at first output, dropped on fallback
             response_id_exposed = False  # rebind-ok: set once, before an early-released lifecycle event is yielded
+            forwarded_non_text_output = False  # rebind-ok: latches non-text output actually yielded to the client
             try:
                 async for item in cast(  # cast-ok: response iterators are async streams
                     AsyncIterator[object], source_iterator
@@ -4520,6 +4547,7 @@ class PythonCore(DeprecatedRouterMembers):
                     for held_event in held_lifecycle_events:
                         yield held_event
                     held_lifecycle_events = ()
+                    forwarded_non_text_output = forwarded_non_text_output or _is_responses_non_text_output_event(item)
                     yield item
                 for held_event in held_lifecycle_events:
                     yield held_event
@@ -4537,6 +4565,8 @@ class PythonCore(DeprecatedRouterMembers):
                 )
                 if response_id_exposed:
                     self._raise_released_stream_error(e, initial_kwargs)
+                if forwarded_non_text_output:
+                    PythonCore._raise_original_mid_stream_error(e)
                 async with contextlib.aclosing(
                     self._aresponses_fallback_attempt(
                         e, source_iterator, initial_kwargs, wrapper.adopt_fallback_headers, held_lifecycle_events

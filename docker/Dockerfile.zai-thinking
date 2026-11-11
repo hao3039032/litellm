@@ -1,5 +1,5 @@
-# Custom patches that remain on top of upstream v1.109.0. OpenCode providers, ZAI UI registration,
-# and the Responses fallback splice guard are inherited from the upstream base image.
+# Custom patches that remain on top of upstream v1.109.0. OpenCode providers and ZAI UI registration are
+# inherited from the upstream base image.
 FROM ghcr.io/berriai/litellm-database:v1.109.0@sha256:5b645ba56f839a402905fed102b35f1c2dcfb190fd2f0d8cbc0f850ed442a9a4
 
 RUN /app/.venv/bin/python -m ensurepip \
@@ -19,6 +19,7 @@ COPY docker/strip_images.py /app/strip_images.py
 COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
 COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /app/.venv/lib/python3.13/site-packages/litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py
 COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
+COPY litellm/router_python_core.py /app/.venv/lib/python3.13/site-packages/litellm/router_python_core.py
 COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/hooks/responses_id_security.py
 
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true

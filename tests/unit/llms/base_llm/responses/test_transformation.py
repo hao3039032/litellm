@@ -1644,11 +1644,12 @@ async def test_responses_fallback_surfaces_the_primary_error_once_the_cut_stream
 
 
 def _openai_stream_cut_after_event(preamble: str, event: Mapping[str, object]) -> httpx.Response:
+    text: Final = {
+        "type": "response.output_text.delta", "sequence_number": 0,
+        "item_id": "msg_primary", "output_index": 0, "content_index": 0, "delta": preamble,
+    }
     return _sse(
-        {
-            "type": "response.output_text.delta", "sequence_number": 0,
-            "item_id": "msg_primary", "output_index": 0, "content_index": 0, "delta": preamble,
-        },
+        *((text,) if preamble else ()),
         {**event, "sequence_number": 1},
         {
             "type": "error", "sequence_number": 2,
@@ -1706,25 +1707,118 @@ async def test_responses_fallback_surfaces_the_primary_error_once_the_cut_stream
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "server_run_event",
+    "non_text_event, expected_type",
     [
-        {
-            "type": "response.output_item.added", "output_index": 1,
-            "item": {
-                "type": "mcp_call", "id": "mcp_1", "name": "ask_question", "arguments": "{}",
-                "server_label": "docs", "status": "in_progress",
+        pytest.param(
+            {
+                "type": "response.output_item.added",
+                "output_index": 1,
+                "item": {
+                    "type": "mcp_call",
+                    "id": "mcp_1",
+                    "name": "ask_question",
+                    "arguments": "{}",
+                    "server_label": "docs",
+                    "status": "in_progress",
+                },
             },
-        },
-        {"type": "response.mcp_call_arguments.delta", "output_index": 1, "item_id": "mcp_1", "delta": '{"question": "set'},
+            "response.output_item.added",
+            id="server_run_mcp_call_item",
+        ),
+        pytest.param(
+            {
+                "type": "response.mcp_call_arguments.delta",
+                "output_index": 1,
+                "item_id": "mcp_1",
+                "delta": '{"question": "set',
+            },
+            "response.mcp_call_arguments.delta",
+            id="server_run_mcp_call_arguments",
+        ),
+        pytest.param(
+            {
+                "type": "response.output_item.added",
+                "output_index": 1,
+                "item": {"type": "reasoning", "id": "rs_1", "summary": []},
+            },
+            "response.output_item.added",
+            id="reasoning_item",
+        ),
+        pytest.param(
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "output_index": 1,
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "Planning the next step",
+            },
+            "response.reasoning_summary_text.delta",
+            id="reasoning_summary_delta",
+        ),
+        pytest.param(
+            {
+                "type": "response.content_part.added",
+                "output_index": 0,
+                "item_id": "msg_1",
+                "content_index": 0,
+                "part": {"type": "refusal", "refusal": "Cannot comply"},
+            },
+            "response.content_part.added",
+            id="refusal_part",
+        ),
     ],
-    ids=["mcp_call_item", "mcp_call_arguments"],
 )
-async def test_responses_fallback_continues_after_a_server_run_mcp_call(
-    server_run_event: Mapping[str, object], respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("preamble", ["", "Let me check the docs. "], ids=["no_text", "after_text"])
+async def test_responses_fallback_surfaces_the_primary_error_after_non_text_output(
+    non_text_event: Mapping[str, object],
+    expected_type: str,
+    preamble: str,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
     respx_mock.post("https://api.openai.com/v1/responses").mock(
-        return_value=_openai_stream_cut_after_event("Let me check the docs. ", server_run_event)
+        return_value=_openai_stream_cut_after_event(preamble, non_text_event)
+    )
+    fallback: Final = respx_mock.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=_anthropic_stream("The docs cover setup.")
+    )
+    router: Final = _primary_with_fallback("anthropic/claude-opus-5-5")
+    try:
+        stream: Final = await router.aresponses(model="primary", input="What do the docs cover?", stream=True)
+        if preamble:
+            assert (await anext(stream)).type == ResponsesAPIStreamEvents.OUTPUT_TEXT_DELTA
+        assert (await anext(stream)).type == expected_type
+        with pytest.raises(litellm.InternalServerError, match="interrupted"):
+            await anext(stream)
+        assert fallback.call_count == 0
+    finally:
+        router.discard()
+
+
+@pytest.mark.asyncio
+async def test_responses_fallback_continues_when_only_lifecycle_events_were_held(
+    respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    respx_mock.post("https://api.openai.com/v1/responses").mock(
+        return_value=_sse(
+            {
+                "type": "response.created",
+                "sequence_number": 0,
+                "response": {"id": "resp_primary", "object": "response", "status": "in_progress", "output": []},
+            },
+            {
+                "type": "response.in_progress",
+                "sequence_number": 1,
+                "response": {"id": "resp_primary", "object": "response", "status": "in_progress", "output": []},
+            },
+            {
+                "type": "error",
+                "sequence_number": 2,
+                "error": {"type": "server_error", "code": "internal_error", "message": "interrupted"},
+            },
+        )
     )
     fallback: Final = respx_mock.post("https://api.anthropic.com/v1/messages").mock(
         return_value=_anthropic_stream("The docs cover setup.")
@@ -1735,6 +1829,7 @@ async def test_responses_fallback_continues_after_a_server_run_mcp_call(
         events: Final = tuple([event async for event in stream])
         assert _streamed_text(events).endswith("The docs cover setup.")
         assert fallback.call_count == 1
+        assert [event.type for event in events].count(ResponsesAPIStreamEvents.RESPONSE_CREATED) == 1
     finally:
         router.discard()
 
@@ -1856,7 +1951,7 @@ async def test_bridged_responses_fallback_surfaces_the_primary_error_once_the_cu
 
 
 @pytest.mark.asyncio
-async def test_bridged_responses_fallback_continues_after_a_server_run_tool_search(
+async def test_bridged_responses_fallback_surfaces_the_primary_error_after_a_server_run_tool_search(
     respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
@@ -1887,9 +1982,9 @@ async def test_bridged_responses_fallback_continues_after_a_server_run_tool_sear
                 {"type": "function", "name": "lookup", "parameters": {"type": "object"}, "defer_loading": True},
             ],
         )
-        events: Final = tuple([event async for event in stream])
-        assert _streamed_text(events).endswith("It is sunny in Paris.")
-        assert provider.call_count == 2
+        with pytest.raises(litellm.InternalServerError, match="interrupted"):
+            [event async for event in stream]
+        assert provider.call_count == 1
     finally:
         router.discard()
 

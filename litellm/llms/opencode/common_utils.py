@@ -4,8 +4,12 @@ from typing import Final
 
 from pydantic import TypeAdapter
 
-from litellm.litellm_core_utils.core_helpers import provider_reported_usage_cost, set_response_cost_in_hidden_params
-from litellm.litellm_core_utils.provider_affinity import add_provider_affinity_header
+from litellm.litellm_core_utils.core_helpers import (
+    as_str_mapping,
+    provider_reported_usage_cost,
+    set_response_cost_in_hidden_params,
+)
+from litellm.litellm_core_utils.provider_affinity import add_provider_affinity_header, get_stable_session_id
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import ResponsesAPIResponse
 from litellm.types.utils import ModelResponse
@@ -50,6 +54,35 @@ def go_api_key(api_key: str | None) -> str | None:
     return api_key or get_secret_str("OPENCODE_GO_API_KEY") or get_secret_str("OPENCODE_API_KEY")
 
 
+def _go_param(params: object, name: str) -> object:
+    mapping: Final = as_str_mapping(params)
+    return mapping.get(name) if mapping is not None else getattr(params, name, None)
+
+
+def _go_session_id(params: object) -> str | None:
+    inbound_headers: Final = as_str_mapping(_go_param(_go_param(params, "proxy_server_request"), "headers"))
+    inbound_session: Final = next(
+        (
+            value
+            for name, value in (inbound_headers or {}).items()
+            if name.lower() == "x-opencode-session" and isinstance(value, str) and value
+        ),
+        None,
+    )
+    caller_session: Final = inbound_session or get_stable_session_id(params)
+    if caller_session:
+        return caller_session
+    # Request IDs satisfy Go's required header without changing the router's conversation affinity.
+    return next(
+        (
+            value
+            for name in ("litellm_trace_id", "litellm_call_id")
+            if isinstance(value := _go_param(params, name), str) and value
+        ),
+        None,
+    )
+
+
 def go_headers(
     headers: Mapping[str, object],
     params: object,
@@ -65,11 +98,12 @@ def go_headers(
             llm_provider="opencode_go",
             model=model,
         )
-    return add_provider_affinity_header(
+    session_headers: Final = add_provider_affinity_header(
         {"Content-Type": "application/json", **headers, "Authorization": f"Bearer {resolved_key}"},
-        params,
+        {"session_id": _go_session_id(params)},
         "x-opencode-session",
     )
+    return add_provider_affinity_header(session_headers, params, "x-opencode-session")
 
 
 def go_reported_cost(usage: object) -> float | None:

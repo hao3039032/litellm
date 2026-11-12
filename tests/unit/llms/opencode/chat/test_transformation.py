@@ -15,6 +15,7 @@ from litellm.litellm_core_utils.core_helpers import RESPONSE_COST_HEADER
 from litellm.litellm_core_utils.litellm_logging import Logging
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
 from litellm.llms.opencode.common_utils import go_headers
+from litellm.types.router import GenericLiteLLMParams
 
 
 @pytest.fixture
@@ -84,8 +85,9 @@ def upstream_reply(route: str, model: str) -> Mapping[str, object]:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("upstream", ["chat/completions", "messages", "responses", "gemini"])
 @pytest.mark.parametrize("ingress", ["chat", "responses", "messages"])
+@pytest.mark.parametrize("session_field", ["litellm_session_id", "litellm_trace_id"])
 async def test_all_routes_use_model_protocol_and_preserve_session(
-    go_catalog: None, upstream: str, ingress: str
+    go_catalog: None, upstream: str, ingress: str, session_field: str
 ) -> None:
     model: Final = f"fixture-{upstream.split('/')[0]}"
 
@@ -114,7 +116,7 @@ async def test_all_routes_use_model_protocol_and_preserve_session(
         kwargs: Final = {
             "model": f"opencode_go/{model}",
             "api_key": "fake-go-key",
-            "litellm_session_id": "conversation-1",
+            session_field: "conversation-1",
         }
         if ingress == "chat":
             response: Final = await litellm.acompletion(messages=[{"role": "user", "content": "hello"}], **kwargs)
@@ -132,6 +134,64 @@ async def test_all_routes_use_model_protocol_and_preserve_session(
             )
             assert message["content"][0]["text"] == "hello"
             assert message["usage"]["output_tokens"] == 5
+
+
+@pytest.mark.parametrize("object_params", [False, True])
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"litellm_trace_id": "request-trace", "litellm_call_id": "request-call"}, "request-trace"),
+        ({"litellm_call_id": "request-call"}, "request-call"),
+        ({"litellm_trace_id": "", "litellm_call_id": "request-call"}, "request-call"),
+        ({"litellm_session_id": "conversation", "litellm_trace_id": "request-trace"}, "conversation"),
+        ({"metadata": {"session_id": "conversation"}, "litellm_call_id": "request-call"}, "conversation"),
+        (
+            {
+                "proxy_server_request": {"headers": {"X-OpenCode-Session": "inbound-conversation"}},
+                "litellm_session_id": "conversation",
+                "litellm_trace_id": "request-trace",
+            },
+            "inbound-conversation",
+        ),
+    ],
+)
+def test_go_session_fallback_preserves_caller_identity(
+    params: dict[str, object], expected: str, object_params: bool
+) -> None:
+    validated: Final = GenericLiteLLMParams.model_validate(params) if object_params else params
+    result: Final = go_headers({}, validated, "fake-go-key", "fixture-model")
+    assert result["x-opencode-session"] == expected
+    assert result["Authorization"] == "Bearer fake-go-key"
+    assert go_headers({"X-OpenCode-Session": "explicit"}, validated, "fake-go-key", "fixture-model") == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer fake-go-key",
+        "X-OpenCode-Session": "explicit",
+    }
+
+
+@pytest.mark.parametrize("value", ["bad\rvalue", "bad\nvalue", "bad\0value"])
+@pytest.mark.parametrize("source", ["trace", "inbound"])
+def test_go_rejects_control_characters_in_fallback_session(value: str, source: str) -> None:
+    params: Final = (
+        {"litellm_trace_id": value}
+        if source == "trace"
+        else {"proxy_server_request": {"headers": {"x-opencode-session": value}}}
+    )
+    with pytest.raises(ValueError, match="control characters"):
+        go_headers({}, params, "fake-go-key", "fixture-model")
+
+
+def test_go_fallback_does_not_rewrite_params_or_other_affinity_headers() -> None:
+    params: Final = {"litellm_trace_id": "request-trace", "provider_affinity_header": "x-custom-session"}
+    headers: Final = {"x-existing": "untouched"}
+    assert go_headers(headers, params, "fake-go-key", "fixture-model") == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer fake-go-key",
+        "x-existing": "untouched",
+        "x-opencode-session": "request-trace",
+    }
+    assert params == {"litellm_trace_id": "request-trace", "provider_affinity_header": "x-custom-session"}
+    assert headers == {"x-existing": "untouched"}
 
 
 def test_go_never_falls_back_to_other_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:

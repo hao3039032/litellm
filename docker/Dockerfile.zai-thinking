@@ -1,11 +1,11 @@
-# Custom patches that remain on top of upstream v1.109.0. OpenCode providers and ZAI UI registration are
-# inherited from the upstream base image.
+# Custom patches on upstream v1.109.0, including the OpenCode session fallback.
 FROM ghcr.io/berriai/litellm-database:v1.109.0@sha256:5b645ba56f839a402905fed102b35f1c2dcfb190fd2f0d8cbc0f850ed442a9a4
 
 RUN /app/.venv/bin/python -m ensurepip \
     && /app/.venv/bin/python -m pip install --no-cache-dir socksio==1.0.0 aiohttp-socks==0.12.0
 
 COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
+COPY litellm/llms/opencode/common_utils.py /app/.venv/lib/python3.13/site-packages/litellm/llms/opencode/common_utils.py
 COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json
 
 COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py

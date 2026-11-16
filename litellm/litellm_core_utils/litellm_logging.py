@@ -2486,14 +2486,25 @@ class Logging(LiteLLMLoggingBaseClass):
         try:
             import httpx
 
-            completion_response = result.model_dump(by_alias=True) if isinstance(result, BaseModel) else dict(result)
-            return litellm.VertexGeminiConfig().transform_google_generate_content_to_openai_model_response(
-                completion_response=completion_response,
-                model_response=ModelResponse(),
-                model=self.model or "",
-                logging_obj=self,
-                raw_response=httpx.Response(status_code=200, headers={}),
+            completion_response: Final = TypeAdapter(dict[str, object]).validate_python(
+                result.model_dump(by_alias=True) if isinstance(result, BaseModel) else result
             )
+            transformed: Final = (
+                litellm.VertexGeminiConfig().transform_google_generate_content_to_openai_model_response(
+                    completion_response=completion_response,
+                    model_response=ModelResponse(),
+                    model=self.model or "",
+                    logging_obj=self,
+                    raw_response=httpx.Response(status_code=200, headers={}),
+                )
+            )
+            set_response_cost_in_hidden_params(
+                transformed,
+                provider_reported_usage_cost(
+                    completion_response.get("usageMetadata"), self.model_call_details.get("custom_llm_provider")
+                ),
+            )
+            return transformed
         except Exception as e:  # noqa: BLE001 - cost normalization must never break the response path
             verbose_logger.debug("generate_content response cost normalization failed: %s", e)
             return None
@@ -5504,6 +5515,12 @@ class Logging(LiteLLMLoggingBaseClass):
             raw_response=httpx.Response(
                 status_code=200,
                 headers={},
+            ),
+        )
+        set_response_cost_in_hidden_params(
+            result,
+            provider_reported_usage_cost(
+                dict_result.get("usageMetadata"), self.model_call_details.get("custom_llm_provider")
             ),
         )
         return result

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import litellm
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
+from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from litellm.llms.custom_httpx.sse_lines import aiter_sse_lines, iter_sse_lines
 from litellm.proxy.pass_through_endpoints.success_handler import (
     PassThroughEndpointLogging,
@@ -65,7 +66,7 @@ class BaseGoogleGenAIGenerateContentStreamingIterator:
     def __init__(
         self,
         litellm_logging_obj: LiteLLMLoggingObj,
-        request_body: dict,
+        request_body: dict[str, object],
         model: str,
         custom_llm_provider: str,
         hidden_params: dict[str, object] | None = None,
@@ -77,9 +78,43 @@ class BaseGoogleGenAIGenerateContentStreamingIterator:
         self.model = model
         self.custom_llm_provider = custom_llm_provider
         self.endpoint_type: Final = (
-            EndpointType.GEMINI if custom_llm_provider == litellm.LlmProviders.GEMINI.value else EndpointType.VERTEX_AI
+            EndpointType.VERTEX_AI
+            if custom_llm_provider == litellm.LlmProviders.VERTEX_AI.value
+            else EndpointType.GEMINI
         )
         self._hidden_params: dict[str, object] = hidden_params or {}
+        self._streaming_logging_dispatched = False
+
+    def _claim_streaming_logging_dispatch(self) -> bool:
+        if self._streaming_logging_dispatched:
+            return False
+        self._streaming_logging_dispatched = True
+        return True
+
+    def _handle_sync_streaming_logging(self) -> None:
+        """Dispatch on the logging worker when a loop is running, else run the coroutine to completion."""
+        from litellm.proxy.pass_through_endpoints.streaming_handler import (
+            PassThroughStreamingHandler,
+        )
+
+        end_time: Final = datetime.now()
+        logging_coroutine: Final = PassThroughStreamingHandler.route_streaming_logging_to_handler(
+            litellm_logging_obj=self.litellm_logging_obj,
+            passthrough_success_handler_obj=GLOBAL_PASS_THROUGH_SUCCESS_HANDLER_OBJ,
+            url_route="/v1/generateContent",
+            request_body=self.request_body or {},
+            endpoint_type=self.endpoint_type,
+            start_time=self.start_time,
+            raw_bytes=list(self.collected_chunks),
+            end_time=end_time,
+            model=self.model,
+        )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(logging_coroutine)
+            return
+        GLOBAL_LOGGING_WORKER.ensure_initialized_and_enqueue(async_coroutine=logging_coroutine)
 
     async def _handle_async_streaming_logging(
         self,
@@ -118,7 +153,7 @@ class GoogleGenAIGenerateContentStreamingIterator(BaseGoogleGenAIGenerateContent
         generate_content_provider_config: BaseGoogleGenAIGenerateContentConfig,
         litellm_metadata: dict,
         custom_llm_provider: str,
-        request_body: dict | None = None,
+        request_body: dict[str, object] | None = None,
         hidden_params: dict[str, object] | None = None,
     ):
         super().__init__(
@@ -142,9 +177,13 @@ class GoogleGenAIGenerateContentStreamingIterator(BaseGoogleGenAIGenerateContent
     def __next__(self):
         try:
             chunk: Final = _next_google_genai_sse_chunk(self.stream_iterator)
+            if self.litellm_logging_obj.completion_start_time is None:
+                self.litellm_logging_obj.update_completion_start_time(completion_start_time=datetime.now())
             self.collected_chunks.append(chunk)
             return chunk
         except StopIteration:
+            if self._claim_streaming_logging_dispatch():
+                self._handle_sync_streaming_logging()
             raise StopIteration
 
     def __aiter__(self):
@@ -169,7 +208,7 @@ class AsyncGoogleGenAIGenerateContentStreamingIterator(BaseGoogleGenAIGenerateCo
         generate_content_provider_config: BaseGoogleGenAIGenerateContentConfig,
         litellm_metadata: dict,
         custom_llm_provider: str,
-        request_body: dict | None = None,
+        request_body: dict[str, object] | None = None,
         hidden_params: dict[str, object] | None = None,
     ):
         super().__init__(
@@ -198,5 +237,6 @@ class AsyncGoogleGenAIGenerateContentStreamingIterator(BaseGoogleGenAIGenerateCo
             self.collected_chunks.append(chunk)
             return chunk
         except StopAsyncIteration:
-            await self._handle_async_streaming_logging()
+            if self._claim_streaming_logging_dispatch():
+                await self._handle_async_streaming_logging()
             raise StopAsyncIteration

@@ -11731,9 +11731,14 @@ class ProviderConfigManager:
             return VertexAIGoogleGenAIConfig()
         elif litellm.LlmProviders.OPENCODE_GO == provider:
             from litellm.llms.opencode.chat.transformation import (
+                go_endpoint,
                 go_google_genai_config,
             )
 
+            # Only Go models that speak the Gemini protocol take the native route;
+            # every other model keeps the adapter, which picks the right Go endpoint.
+            if go_endpoint(model) != "/v1beta/models":
+                return None
             return go_google_genai_config()
         return None
 

@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from functools import cache
 from typing import TYPE_CHECKING, ClassVar, Final
 
 import httpx
@@ -25,10 +26,10 @@ from litellm.types.llms.openai import AllMessageValues
 from litellm.types.utils import ModelResponse, Usage
 
 if TYPE_CHECKING:
+    from litellm.litellm_core_utils.litellm_logging import Logging
     from litellm.llms.base_llm.google_genai.transformation import (
         BaseGoogleGenAIGenerateContentConfig,
     )
-    from litellm.litellm_core_utils.litellm_logging import Logging
 
 
 class _GoReportedCostMixin:
@@ -281,73 +282,61 @@ class OpenCodeGoGeminiChatConfig(_GoReportedCostMixin, GoogleAIStudioGeminiConfi
         return TypeAdapter(dict[str, object]).validate_python(body)
 
 
-_GO_GOOGLE_GENAI_CONFIG_CLASS: type | None = None
+@cache
+def _go_google_genai_config_class() -> "type[BaseGoogleGenAIGenerateContentConfig]":
+    from litellm.llms.gemini.google_genai.transformation import GoogleGenAIConfig
+
+    class _OpenCodeGoGoogleGenAIConfig(GoogleGenAIConfig):
+        def _opencode_url(self, api_base: str | None, model: str, stream: bool) -> str:
+            base: Final = ensure_api_route(
+                go_api_base(api_base, model).rstrip("/").removesuffix("/v1beta"), "v1beta/models"
+            )
+            action: Final = "streamGenerateContent?alt=sse" if stream else "generateContent"
+            return f"{base}/{model}:{action}"
+
+        def _opencode_headers(
+            self, model: str, litellm_params: Mapping[str, object]
+        ) -> dict[str, str]:  # mutable-ok: the HTTP handler update()s the returned headers
+            api_key: Final = litellm_params.get("api_key")
+            headers: Final = go_headers(
+                {},
+                litellm_params,
+                api_key if isinstance(api_key, str) else None,
+                model,
+            )
+            return TypeAdapter(dict[str, str]).validate_python(headers)
+
+        def sync_get_auth_token_and_url(
+            self,
+            api_base: str | None,
+            model: str,
+            litellm_params: Mapping[str, object],
+            stream: bool,
+        ) -> tuple[dict[str, str], str]:  # mutable-ok: the HTTP handler update()s the returned headers
+            return (
+                dict(self._opencode_headers(model, litellm_params)),
+                self._opencode_url(api_base, model, stream),
+            )
+
+        async def get_auth_token_and_url(
+            self,
+            api_base: str | None,
+            model: str,
+            litellm_params: Mapping[str, object],
+            stream: bool,
+        ) -> tuple[dict[str, str], str]:  # mutable-ok: the HTTP handler update()s the returned headers
+            return self.sync_get_auth_token_and_url(api_base, model, litellm_params, stream)
+
+    return _OpenCodeGoGoogleGenAIConfig
 
 
 def go_google_genai_config() -> "BaseGoogleGenAIGenerateContentConfig":
-    """Native Gemini generateContent config that talks to OpenCode Go directly.
+    """Native Gemini generateContent config for OpenCode Go's Gemini-protocol models.
 
-    Without this, a deployment using ``custom_llm_provider="opencode_go"`` has no
-    generateContent provider config, so the native ``/v1beta`` route falls back to
-    ``GenerateContentToCompletionHandler``: the native request is converted to a chat
-    completion and the reply is converted back to Gemini wire format. That round trip
-    drops ``thoughtSignature`` from ``functionCall`` parts (and Gemini thought parts),
-    so the next turn fails with "Function call is missing a thought_signature".
-
-    Serving the route natively keeps the wire format byte-identical and reuses
-    ``go_headers`` for the ``x-opencode-session`` header OpenCode Go requires.
+    Without it the native ``/v1beta`` route falls back to the completion adapter, whose
+    round trip drops ``thoughtSignature`` from ``functionCall`` parts.
     """
-    global _GO_GOOGLE_GENAI_CONFIG_CLASS
-    if _GO_GOOGLE_GENAI_CONFIG_CLASS is None:
-        from litellm.llms.gemini.google_genai.transformation import GoogleGenAIConfig
-
-        class _OpenCodeGoGoogleGenAIConfig(GoogleGenAIConfig):
-            @property
-            def custom_llm_provider(self) -> str:
-                # The GoogleGenAIConfig contract only allows gemini/vertex_ai. The URL and
-                # headers are fully overridden below, so this only selects Gemini's wire format.
-                return "gemini"
-
-            def _opencode_url(self, api_base: str | None, model: str, stream: bool) -> str:
-                base: Final = go_api_base(api_base, model).rstrip("/").removesuffix("/v1beta")
-                action: Final = "streamGenerateContent?alt=sse" if stream else "generateContent"
-                return f"{base}/v1beta/models/{model}:{action}"
-
-            def _opencode_headers(
-                self, model: str, litellm_params: Mapping[str, object]
-            ) -> dict[str, str]:
-                api_key: Final = litellm_params.get("api_key")
-                headers: Final = go_headers(
-                    {},
-                    litellm_params,
-                    api_key if isinstance(api_key, str) else None,
-                    model,
-                )
-                return TypeAdapter(dict[str, str]).validate_python(headers)
-
-            def sync_get_auth_token_and_url(
-                self,
-                api_base: str | None,
-                model: str,
-                litellm_params: dict,
-                stream: bool,
-            ) -> tuple[dict, str]:
-                return (
-                    dict(self._opencode_headers(model, litellm_params)),
-                    self._opencode_url(api_base, model, stream),
-                )
-
-            async def get_auth_token_and_url(
-                self,
-                api_base: str | None,
-                model: str,
-                litellm_params: dict,
-                stream: bool,
-            ) -> tuple[dict, str]:
-                return self.sync_get_auth_token_and_url(api_base, model, litellm_params, stream)
-
-        _GO_GOOGLE_GENAI_CONFIG_CLASS = _OpenCodeGoGoogleGenAIConfig
-    return _GO_GOOGLE_GENAI_CONFIG_CLASS()
+    return _go_google_genai_config_class()()
 
 
 def go_chat_config(model: str) -> BaseConfig:

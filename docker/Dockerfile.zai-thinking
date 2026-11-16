@@ -17,6 +17,10 @@ COPY litellm/utils.py /app/.venv/lib/python3.13/site-packages/litellm/utils.py
 COPY docker/strip_images.py /app/strip_images.py
 
 COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
+COPY litellm/litellm_core_utils/litellm_logging.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/litellm_logging.py
+COPY litellm/google_genai/streaming_iterator.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/streaming_iterator.py
+COPY litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py
+COPY litellm/proxy/pass_through_endpoints/streaming_handler.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/pass_through_endpoints/streaming_handler.py
 COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /app/.venv/lib/python3.13/site-packages/litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py
 COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
 COPY litellm/router_rust/invoke/streaming.py /app/.venv/lib/python3.13/site-packages/litellm/router_rust/invoke/streaming.py

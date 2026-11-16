@@ -864,3 +864,135 @@ def test_go_messages_route_carries_prompt_cache_breakpoint_to_cache_control_only
     wire: Final = json.dumps(request)
     assert wire.count('"cache_control"') == cache_marks
     assert "prompt_cache_breakpoint" not in wire
+GO_USER_CONTENTS: Final = [{"role": "user", "parts": [{"text": "hello"}]}]
+
+GO_NATIVE_TOOL_REPLY: Final = {
+    "candidates": [
+        {
+            "content": {
+                "role": "model",
+                "parts": [
+                    {"text": "checking", "thought": True},
+                    {"functionCall": {"name": "lookup", "args": {"q": "hi"}}, "thoughtSignature": "sig-round-1"},
+                ],
+            },
+            "finishReason": "STOP",
+        }
+    ],
+    "usageMetadata": {
+        "promptTokenCount": 10,
+        "candidatesTokenCount": 5,
+        "totalTokenCount": 15,
+        "opencode": {"billing_source": "go", "list_cost": 0.00412},
+    },
+}
+
+
+def _wire(response: object) -> str:
+    return json.dumps(response if isinstance(response, dict) else response.model_dump(by_alias=True))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upstream", ["chat/completions", "messages", "responses"])
+async def test_native_route_leaves_non_gemini_models_on_their_own_protocol(go_catalog: None, upstream: str) -> None:
+    model: Final = f"fixture-{upstream.split('/')[0]}"
+    family: Final = "anthropic" if upstream == "messages" else "openai"
+    with respx.mock(using="httpx") as transport:
+        transport.post().mock(
+            return_value=httpx.Response(200, json=go_priced_reply(upstream, model, GO_REPORTED_USAGE))
+        )
+        response: Final = await litellm.agenerate_content(
+            model=f"opencode_go/{model}", contents=GO_USER_CONTENTS, api_key="fake-go-key"
+        )
+        assert transport.calls.last.request.url.path == f"/inference/go/{family}/v1/{upstream}"
+    assert "hello" in _wire(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+async def test_native_generate_content_bills_reported_list_cost_and_keeps_the_wire_format(
+    go_catalog: None, cost_recorder: CostRecorder, stream: bool, is_async: bool
+) -> None:
+    seen_bodies: Final[list[object]] = []  # mutable-ok: test probe captures upstream request bodies
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        streaming_turn: Final = stream and not seen_bodies
+        action: Final = "streamGenerateContent?alt=sse" if streaming_turn else "generateContent"
+        assert request.url.path == f"/inference/go/google/v1beta/models/fixture-gemini:{action.split('?')[0]}"
+        assert request.url.query == (b"alt=sse" if streaming_turn else b"")
+        assert request.headers["x-opencode-session"] == "conversation-1"
+        body: Final[object] = json.loads(request.content)
+        assert "stream" not in body
+        seen_bodies.append(body)
+        if streaming_turn:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                text="data: " + json.dumps(GO_NATIVE_TOOL_REPLY) + "\n\n",
+            )
+        return httpx.Response(200, json=GO_NATIVE_TOOL_REPLY)
+
+    call_kwargs: Final = {
+        "model": "opencode_go/fixture-gemini",
+        "contents": GO_USER_CONTENTS,
+        "api_key": "fake-go-key",
+        "litellm_session_id": "conversation-1",
+    }
+    with respx.mock(using="httpx") as transport:
+        transport.post().mock(side_effect=respond)
+        if stream and is_async:
+            async_iterator: Final = await litellm.google_genai.agenerate_content_stream(**call_kwargs)
+            async_wire: Final = b"".join([chunk async for chunk in async_iterator])
+            assert b"thoughtSignature" in async_wire
+        elif stream:
+            sync_iterator: Final = litellm.google_genai.generate_content_stream(**call_kwargs)
+            sync_wire: Final = b"".join(sync_iterator)
+            assert b"thoughtSignature" in sync_wire
+        elif is_async:
+            async_response: Final = await litellm.agenerate_content(**call_kwargs)
+            assert "sig-round-1" in _wire(async_response)
+        else:
+            sync_response: Final = litellm.google_genai.generate_content(**call_kwargs)
+            assert "sig-round-1" in _wire(sync_response)
+            assert sync_response._hidden_params["response_cost"] == pytest.approx(0.00412)
+
+        second_turn: Final = [
+            *GO_USER_CONTENTS,
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {"name": "lookup", "args": {"q": "hi"}},
+                        "thoughtSignature": "sig-round-1",
+                    }
+                ],
+            },
+            {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"result": "ok"}}}]},
+        ]
+        turn_kwargs: Final = {**call_kwargs, "contents": second_turn}
+        if is_async:
+            await litellm.agenerate_content(**turn_kwargs)
+        else:
+            litellm.google_genai.generate_content(**turn_kwargs)
+    assert len(seen_bodies) == 2
+    second_request: Final = json.dumps(seen_bodies[-1])
+    assert "thoughtSignature" in second_request
+    assert "functionResponse" in second_request
+    if stream or is_async:
+        assert await logged_cost(cost_recorder) == pytest.approx(0.00412)
+
+
+@pytest.mark.parametrize("suffix", ["", "/v1beta", "/v1beta/models", "/v1beta/models/"])
+def test_native_generate_content_custom_base_normalizes(go_catalog: None, suffix: str) -> None:
+    with respx.mock(using="httpx") as transport:
+        transport.post("https://gateway.example/google/v1beta/models/fixture-gemini:generateContent").respond(
+            json=upstream_reply("gemini", "fixture-gemini")
+        )
+        response: Final = litellm.google_genai.generate_content(
+            model="opencode_go/fixture-gemini",
+            contents=GO_USER_CONTENTS,
+            api_key="fake-go-key",
+            api_base=f"https://gateway.example/google{suffix}",
+        )
+        assert "hello" in _wire(response)

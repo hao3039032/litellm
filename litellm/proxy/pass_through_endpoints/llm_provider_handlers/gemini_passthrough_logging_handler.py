@@ -1,13 +1,18 @@
+import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
 import httpx
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 import litellm
 from litellm._logging import verbose_proxy_logger
+from litellm.litellm_core_utils.core_helpers import (
+    provider_reported_usage_cost,
+    set_response_cost_in_hidden_params,
+)
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.gemini.videos.transformation import GeminiVideoConfig
 from litellm.llms.vertex_ai.common_utils import get_vertex_model_id_from_url
@@ -37,6 +42,27 @@ else:
 
 _JSON_OBJECT: Final = TypeAdapter(dict[str, object])
 _EMPTY: Final[Mapping[str, object]] = MappingProxyType({})
+_USAGE_METADATA_CARRIER: Final = TypeAdapter(Mapping[str, object])
+_PROVIDER_ADAPTER: Final = TypeAdapter(str)
+
+
+def _chunk_usage_metadata(chunk: str) -> object | None:
+    body: Final[str | None] = litellm.CustomStreamWrapper.strip_sse_data_from_chunk(chunk)
+    if not body:
+        return None
+    try:
+        decoded: Final = _USAGE_METADATA_CARRIER.validate_python(json.loads(body))
+    except (json.JSONDecodeError, ValidationError):
+        return None
+    return decoded.get("usageMetadata")
+
+
+def _last_usage_metadata(all_chunks: Sequence[str]) -> object | None:
+    for chunk in reversed(all_chunks):
+        usage_metadata: object | None = _chunk_usage_metadata(chunk)
+        if usage_metadata is not None:
+            return usage_metadata
+    return None
 
 
 class GeminiPassthroughLoggingHandler:
@@ -260,6 +286,9 @@ class GeminiPassthroughLoggingHandler:
         """
         kwargs: dict[str, object] = {}
         model = model or GeminiPassthroughLoggingHandler.extract_model_from_url(url_route)
+        custom_llm_provider: Final = _PROVIDER_ADAPTER.validate_python(
+            litellm_logging_obj.model_call_details.get("custom_llm_provider") or "gemini"
+        )
         complete_streaming_response: Final = GeminiPassthroughLoggingHandler._build_complete_streaming_response(
             all_chunks=all_chunks,
             litellm_logging_obj=litellm_logging_obj,
@@ -283,7 +312,7 @@ class GeminiPassthroughLoggingHandler:
             start_time=start_time,
             end_time=end_time,
             logging_obj=litellm_logging_obj,
-            custom_llm_provider="gemini",
+            custom_llm_provider=custom_llm_provider,
         )
 
         return {
@@ -314,6 +343,14 @@ class GeminiPassthroughLoggingHandler:
         all_openai_chunks: Final = [parsed_chunk for parsed_chunk in parsed_chunks if parsed_chunk is not None]
 
         complete_streaming_response: Final = litellm.stream_chunk_builder(chunks=all_openai_chunks)
+        if isinstance(complete_streaming_response, ModelResponse):
+            set_response_cost_in_hidden_params(
+                complete_streaming_response,
+                provider_reported_usage_cost(
+                    _last_usage_metadata(all_chunks),
+                    litellm_logging_obj.model_call_details.get("custom_llm_provider"),
+                ),
+            )
 
         return complete_streaming_response
 
@@ -338,7 +375,7 @@ class GeminiPassthroughLoggingHandler:
         response_cost: Final = litellm.completion_cost(
             completion_response=litellm_model_response,
             model=model,
-            custom_llm_provider="gemini",
+            custom_llm_provider=custom_llm_provider,
         )
 
         kwargs["response_cost"] = response_cost

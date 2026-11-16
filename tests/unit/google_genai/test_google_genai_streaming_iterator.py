@@ -52,7 +52,11 @@ def _logging_obj(
 
 @pytest.mark.parametrize(
     "custom_llm_provider, expected_endpoint_type",
-    [("gemini", EndpointType.GEMINI), ("vertex_ai", EndpointType.VERTEX_AI)],
+    [
+        ("gemini", EndpointType.GEMINI),
+        ("vertex_ai", EndpointType.VERTEX_AI),
+        ("opencode_go", EndpointType.GEMINI),
+    ],
 )
 @pytest.mark.parametrize(
     "iterator_cls",

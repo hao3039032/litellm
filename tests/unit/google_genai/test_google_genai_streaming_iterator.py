@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 from datetime import datetime
 from typing import Final
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+import litellm
 from litellm.google_genai.streaming_iterator import (
     AsyncGoogleGenAIGenerateContentStreamingIterator,
     GoogleGenAIGenerateContentStreamingIterator,
@@ -226,6 +228,122 @@ def _gemini_event(text: str, finish_reason: str | None = None) -> str:
         "modelVersion": "gemini-3.1-flash",
     }
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def _exhausted_stream_response() -> httpx.Response:
+    return _sse_response(_gemini_event("Hel") + _gemini_event("lo", "STOP"))
+
+
+def test_sync_iterator_skips_logging_when_streaming_logging_is_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(litellm, "disable_streaming_logging", True)
+    recorder: Final = _SuccessRecorder()
+    iterator: Final = GoogleGenAIGenerateContentStreamingIterator(
+        response=_exhausted_stream_response(),
+        model="gemini-3.1-flash",
+        logging_obj=_logging_obj(recorder=recorder),
+        generate_content_provider_config=MagicMock(),
+        litellm_metadata={},
+        custom_llm_provider="gemini",
+    )
+
+    chunks: Final = tuple(iterator)
+
+    assert b"".join(chunks) == (_gemini_event("Hel") + _gemini_event("lo", "STOP")).encode()
+    assert recorder.logged == []
+
+
+@pytest.mark.asyncio
+async def test_async_iterator_skips_logging_when_streaming_logging_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(litellm, "disable_streaming_logging", True)
+    recorder: Final = _SuccessRecorder()
+    tasks_before: Final = asyncio.all_tasks()
+    iterator: Final = AsyncGoogleGenAIGenerateContentStreamingIterator(
+        response=_exhausted_stream_response(),
+        model="gemini-3.1-flash",
+        logging_obj=_logging_obj(recorder=recorder),
+        generate_content_provider_config=MagicMock(),
+        litellm_metadata={},
+        custom_llm_provider="gemini",
+    )
+
+    chunks: Final = [chunk async for chunk in iterator]
+    await asyncio.gather(*(asyncio.all_tasks() - tasks_before))
+
+    assert b"".join(chunks) == (_gemini_event("Hel") + _gemini_event("lo", "STOP")).encode()
+    assert recorder.logged == []
+
+
+def test_sync_stream_logging_run_failure_closes_the_coroutine_and_keeps_the_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Final[list[object]] = []  # mutable-ok: test probe captures the logging coroutine
+
+    def failing_run(coroutine: object) -> None:
+        captured.append(coroutine)
+        raise RuntimeError("no event loop available")
+
+    monkeypatch.setattr(asyncio, "run", failing_run)
+    recorder: Final = _SuccessRecorder()
+    iterator: Final = GoogleGenAIGenerateContentStreamingIterator(
+        response=_exhausted_stream_response(),
+        model="gemini-3.1-flash",
+        logging_obj=_logging_obj(recorder=recorder),
+        generate_content_provider_config=MagicMock(),
+        litellm_metadata={},
+        custom_llm_provider="gemini",
+    )
+
+    chunks: Final = tuple(iterator)
+
+    assert b"".join(chunks) == (_gemini_event("Hel") + _gemini_event("lo", "STOP")).encode()
+    assert recorder.logged == []
+    assert len(captured) == 1
+    closed_coroutine: Final = captured[0]
+    assert inspect.iscoroutine(closed_coroutine)
+    assert inspect.getcoroutinestate(closed_coroutine) == inspect.CORO_CLOSED
+    with pytest.raises(StopIteration):
+        next(iterator)
+    assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_stream_logging_enqueue_failure_closes_the_coroutine_and_keeps_the_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Final[list[object]] = []  # mutable-ok: test probe captures the logging coroutine
+
+    class _BrokenWorker:
+        def ensure_initialized_and_enqueue(self, async_coroutine: object) -> None:
+            captured.append(async_coroutine)
+            raise RuntimeError("logging worker unavailable")
+
+    monkeypatch.setattr(
+        "litellm.google_genai.streaming_iterator.GLOBAL_LOGGING_WORKER",
+        _BrokenWorker(),
+    )
+    recorder: Final = _SuccessRecorder()
+    iterator: Final = GoogleGenAIGenerateContentStreamingIterator(
+        response=_exhausted_stream_response(),
+        model="gemini-3.1-flash",
+        logging_obj=_logging_obj(recorder=recorder),
+        generate_content_provider_config=MagicMock(),
+        litellm_metadata={},
+        custom_llm_provider="gemini",
+    )
+
+    chunks: Final = tuple(iterator)
+
+    assert b"".join(chunks) == (_gemini_event("Hel") + _gemini_event("lo", "STOP")).encode()
+    assert recorder.logged == []
+    assert len(captured) == 1
+    closed_coroutine: Final = captured[0]
+    assert inspect.iscoroutine(closed_coroutine)
+    assert inspect.getcoroutinestate(closed_coroutine) == inspect.CORO_CLOSED
+    with pytest.raises(StopIteration):
+        next(iterator)
+    assert len(captured) == 1
 
 
 @pytest.mark.asyncio

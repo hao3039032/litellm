@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator, Mapping
 from datetime import datetime
-from typing import Final, cast
+from typing import Final, Protocol, cast
 
 import httpx
 import pytest
@@ -957,6 +957,10 @@ async def test_native_generate_content_bills_reported_list_cost_and_keeps_the_wi
             assert "sig-round-1" in _wire(sync_response)
             assert sync_response._hidden_params["response_cost"] == pytest.approx(0.00412)
 
+        if stream or is_async:
+            first_turn_cost: Final = await logged_cost(cost_recorder)
+            assert first_turn_cost is not None and abs(first_turn_cost - 0.00412) < 1e-9
+
         second_turn: Final = [
             *GO_USER_CONTENTS,
             {
@@ -996,3 +1000,35 @@ def test_native_generate_content_custom_base_normalizes(go_catalog: None, suffix
             api_base=f"https://gateway.example/google{suffix}",
         )
         assert "hello" in _wire(response)
+
+
+class _BytesChunkStream(Protocol):
+    def __next__(self) -> bytes: ...
+
+    def __iter__(self) -> "_BytesChunkStream": ...
+
+
+def test_native_sync_stream_bills_reported_cost_without_a_running_loop(
+    go_catalog: None, cost_recorder: CostRecorder
+) -> None:
+    with respx.mock(using="httpx") as transport:
+        transport.post().mock(
+            return_value=httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                text="data: " + json.dumps(GO_NATIVE_TOOL_REPLY) + "\n\n",
+            )
+        )
+        native_stream: Final = litellm.google_genai.generate_content_stream(  # pyright: ignore[reportUnknownMemberType]  # the SDK entrypoint's google-genai Any types propagate
+            model="opencode_go/fixture-gemini",
+            contents=GO_USER_CONTENTS,
+            api_key="fake-go-key",
+        )
+        iterator: Final[_BytesChunkStream] = native_stream
+        wire: Final = b"".join(tuple(iterator))
+        with pytest.raises(StopIteration):
+            next(iterator)
+    assert b"thoughtSignature" in wire
+    assert len(cost_recorder.costs) == 1
+    only_cost: Final = cost_recorder.costs[0]
+    assert only_cost is not None and abs(only_cost - 0.00412) < 1e-9

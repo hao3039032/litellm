@@ -1,8 +1,10 @@
 import asyncio
+from collections.abc import Coroutine
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
 
 import litellm
+from litellm._logging import verbose_logger
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from litellm.llms.custom_httpx.sse_lines import aiter_sse_lines, iter_sse_lines
@@ -19,6 +21,22 @@ else:
     BaseGoogleGenAIGenerateContentConfig = Any
 
 GLOBAL_PASS_THROUGH_SUCCESS_HANDLER_OBJ: Final = PassThroughEndpointLogging()
+
+
+def _run_sync_logging_coroutine(coroutine: Coroutine[object, None, None]) -> None:
+    try:
+        asyncio.run(coroutine)
+    except Exception as e:
+        coroutine.close()
+        verbose_logger.error("Google GenAI sync streaming logging failed: %s", e)
+
+
+def _enqueue_sync_logging_coroutine(coroutine: Coroutine[object, None, None]) -> None:
+    try:
+        GLOBAL_LOGGING_WORKER.ensure_initialized_and_enqueue(async_coroutine=coroutine)
+    except Exception as e:
+        coroutine.close()
+        verbose_logger.error("Google GenAI sync streaming logging enqueue failed: %s", e)
 
 
 def _encode_google_genai_sse_event(event_lines: list[str]) -> bytes:
@@ -86,7 +104,7 @@ class BaseGoogleGenAIGenerateContentStreamingIterator:
         self._streaming_logging_dispatched = False
 
     def _claim_streaming_logging_dispatch(self) -> bool:
-        if self._streaming_logging_dispatched:
+        if litellm.disable_streaming_logging or self._streaming_logging_dispatched:
             return False
         self._streaming_logging_dispatched = True
         return True
@@ -112,9 +130,9 @@ class BaseGoogleGenAIGenerateContentStreamingIterator:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(logging_coroutine)
+            _run_sync_logging_coroutine(logging_coroutine)
             return
-        GLOBAL_LOGGING_WORKER.ensure_initialized_and_enqueue(async_coroutine=logging_coroutine)
+        _enqueue_sync_logging_coroutine(logging_coroutine)
 
     async def _handle_async_streaming_logging(
         self,

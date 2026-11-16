@@ -6,7 +6,6 @@ RUN /app/.venv/bin/python -m ensurepip \
 
 COPY litellm/llms/zai/chat/transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/zai/chat/transformation.py
 COPY litellm/llms/opencode/common_utils.py /app/.venv/lib/python3.13/site-packages/litellm/llms/opencode/common_utils.py
-COPY litellm/model_prices_and_context_window_backup.json /app/.venv/lib/python3.13/site-packages/litellm/model_prices_and_context_window_backup.json
 
 COPY litellm/__init__.py /app/.venv/lib/python3.13/site-packages/litellm/__init__.py
 COPY litellm/proxy/litellm_pre_call_utils.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/litellm_pre_call_utils.py
@@ -21,8 +20,6 @@ COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /a
 COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
 COPY litellm/router_rust/invoke/streaming.py /app/.venv/lib/python3.13/site-packages/litellm/router_rust/invoke/streaming.py
 COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/hooks/responses_id_security.py
-
-ENV LITELLM_LOCAL_MODEL_COST_MAP=true
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
 LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.109.0 with custom ZAI, client header, image, and Responses API fixes"

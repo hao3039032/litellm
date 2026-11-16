@@ -11729,6 +11729,12 @@ class ProviderConfigManager:
             if not uses_vertex_gemini_api(model, litellm_params):
                 return None
             return VertexAIGoogleGenAIConfig()
+        elif litellm.LlmProviders.OPENCODE_GO == provider:
+            from litellm.llms.opencode.chat.transformation import (
+                go_google_genai_config,
+            )
+
+            return go_google_genai_config()
         return None
 
 

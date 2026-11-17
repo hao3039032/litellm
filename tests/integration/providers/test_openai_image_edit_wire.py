@@ -237,6 +237,40 @@ def test_image_edit_bracketed_mask_reaches_openai_as_mask_file_part(gateway: Gat
         assert [(request.method, request.target) for request in wire.drain()] == [("POST", "/v1/images/edits")]
 
 
+def test_image_edit_markup_reaches_openai_as_markup_file_part(gateway: Gateway) -> None:
+    """gpt-image markup rides the multipart body as a file part, not a form field or json key"""
+
+    def respond(request: Request) -> Reply:
+        assert request.method == "POST"
+        assert request.target == "/v1/images/edits"
+        assert request.headers["authorization"] == "Bearer synthetic-openai-key"
+        assert request.headers["content-type"].startswith("multipart/form-data; boundary=")
+        parts: Final = _multipart_parts(request)
+        assert _text_parts(parts) == (("model", "gpt-image-2.6"), ("prompt", _PROMPT))
+        assert _file_parts(parts) == (
+            _FilePart("image[]", "image.png", "image/png", _PNG_BYTES),
+            _FilePart("markup", "markup.png", "image/png", _MASK_PNG),
+        )
+        return Reply(body=json.dumps({"created": 1700000000, "data": [{"b64_json": _EDITED_IMAGE_B64}]}).encode())
+
+    with wire_server(respond) as wire, gateway.scenario() as scenario:
+        model: Final = scenario.model(
+            model="openai/gpt-image-2.6", api_base=f"{wire.url}/v1", api_key="synthetic-openai-key"
+        )
+        response: Final = _edit(
+            gateway,
+            {"model": model, "prompt": _PROMPT},
+            (
+                ("image[]", ("red_circle.png", _PNG_BYTES, "image/png")),
+                ("markup", ("notes.png", _MASK_PNG, "image/png")),
+            ),
+        )
+        assert response.status_code == 200, response.text
+        payload: Final = _ImageResponse.model_validate_json(response.content)
+        assert [image.b64_json for image in payload.data] == [_EDITED_IMAGE_B64], response.text
+        assert [(request.method, request.target) for request in wire.drain()] == [("POST", "/v1/images/edits")]
+
+
 def test_image_edit_repeated_bracketed_mask_parts_reach_openai_as_first_mask_only(gateway: Gateway) -> None:
     def respond(request: Request) -> Reply:
         assert request.method == "POST"

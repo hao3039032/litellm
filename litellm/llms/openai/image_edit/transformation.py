@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from io import BufferedReader
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -44,6 +45,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
             "background",
             "input_fidelity",
             "mask",
+            "markup",
             "model",
             "n",
             "output_compression",
@@ -106,7 +108,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
         if prompt is not None:
             request_params["prompt"] = prompt
 
-        request: Final = ImageEditRequestParams(**request_params)
+        request: Final = ImageEditRequestParams(**request_params)  # pyright: ignore[reportArgumentType]  # runtime boundary: multipart form values duck-typed into the TypedDict
         request_dict: Final = cast(dict, request)
 
         #########################################################
@@ -114,7 +116,12 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
         #########################################################
         _image_list: Final = request_dict.get("image")
         _mask = request_dict.get("mask")
-        data_without_files: Final = {k: v for k, v in request_dict.items() if k not in ["image", "mask"]}
+        _markup: Final[FileTypes | Sequence[FileTypes] | None] = request.get("markup")
+        data_without_files: Final[
+            dict[str, object]
+        ] = {  # mutable-ok: base config contract returns tuple[dict, ...]; the annotation narrows the cast(dict) Unknown
+            k: v for k, v in request_dict.items() if k not in ["image", "mask", "markup"]
+        }
         files_list: Final[list[tuple[str, Any]]] = []
 
         # Handle image parameter
@@ -140,6 +147,14 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
                     files_list.append(("mask", (_mask.name, _mask, mask_content_type)))
                 else:
                     files_list.append(("mask", ("mask.png", _mask, mask_content_type)))
+
+        _markup_file: Final = _markup[0] if isinstance(_markup, list) and _markup else _markup
+        if _markup_file is not None:
+            markup_content_type: Final[str] = ImageEditRequestUtils.get_image_content_type(_markup_file)
+            if isinstance(_markup_file, BufferedReader):
+                files_list.append(("markup", (_markup_file.name, _markup_file, markup_content_type)))
+            else:
+                files_list.append(("markup", ("markup.png", _markup_file, markup_content_type)))
 
         return data_without_files, files_list
 

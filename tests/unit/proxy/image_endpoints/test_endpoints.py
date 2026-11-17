@@ -203,6 +203,24 @@ def test_image_edit_canonical_file_fields_still_reach_the_provider(monkeypatch):
     assert captured["prompt"] == "add a hat"
 
 
+def test_image_edit_markup_file_reaches_the_provider_as_read_buffers(monkeypatch):
+    """A gpt-image markup upload must arrive as a readable BytesIO list, not a spent UploadFile."""
+    captured: Dict[str, Any] = {}
+
+    response = _image_edit_client(monkeypatch, captured).post(
+        "/v1/images/edits",
+        files={
+            "image": ("tree.png", b"\x89PNG\r\n\x1a\ntree", "image/png"),
+            "markup": ("notes.png", b"\x89PNG\r\n\x1a\nmarkup", "image/png"),
+        },
+        data={"model": "gpt-image-2.6", "prompt": "add a hat"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [buffer.getvalue() for buffer in captured["markup"]] == [b"\x89PNG\r\n\x1a\nmarkup"]
+    assert [buffer.name for buffer in captured["markup"]] == ["notes.png"]
+
+
 def test_image_edit_multipart_n_reaches_the_provider_as_an_int(monkeypatch):
     """A multipart `n` must not arrive as the string Starlette parsed it into."""
     captured: Dict[str, Any] = {}

@@ -1264,6 +1264,9 @@ OpenAIImageVariationOptionalParams = Literal["n", "size", "response_format", "us
 
 OpenAIImageGenerationOptionalParams = Literal[
     "background",
+    "complexity",
+    "frame_count",
+    "frame_duration_ms",
     "moderation",
     "n",
     "output_compression",
@@ -1272,6 +1275,7 @@ OpenAIImageGenerationOptionalParams = Literal[
     "response_format",
     "size",
     "style",
+    "svg",
     "user",
     "seed",
     "safety_tolerance",

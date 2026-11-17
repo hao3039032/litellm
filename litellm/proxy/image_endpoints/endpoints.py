@@ -272,6 +272,7 @@ async def image_edit_api(
     image_array: list[UploadFile] | None = File(None, alias=IMAGE_ARRAY_FIELD),
     mask: list[UploadFile] | None = File(None),
     mask_array: list[UploadFile] | None = File(None, alias=MASK_ARRAY_FIELD),
+    markup: Sequence[UploadFile] | None = File(None),
     model: str | None = None,
 ):
     """
@@ -330,10 +331,13 @@ async def image_edit_api(
     }
     image_files: Final = await batch_to_bytesio(image)
     mask_files: Final = await batch_to_bytesio(mask)
+    markup_files: Final = await batch_to_bytesio(markup)
     if image_files:
         data["image"] = image_files
     if mask_files:
         data["mask"] = mask_files
+    if markup_files:
+        data["markup"] = markup_files
 
     for _field in ("image", "mask"):
         if _field in data and isinstance(data[_field], str):

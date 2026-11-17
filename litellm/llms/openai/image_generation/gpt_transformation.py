@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 import httpx
@@ -11,6 +12,10 @@ from litellm.types.utils import ImageResponse
 from litellm.utils import convert_to_model_response_object
 
 _JSON_OBJECT: Final = TypeAdapter(dict[str, object], config=ConfigDict(strict=True, hide_input_in_errors=True))
+
+_GPT_IMAGE_EXTRA_BODY_PARAMS: Final[frozenset[str]] = frozenset(
+    ("complexity", "frame_count", "frame_duration_ms", "svg")
+)
 
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.logging import Logging as LiteLLMLoggingObj
@@ -26,12 +31,16 @@ class GPTImageGenerationConfig(BaseImageGenerationConfig):
     def get_supported_openai_params(self, model: str) -> list[OpenAIImageGenerationOptionalParams]:
         return [
             "background",
+            "complexity",
+            "frame_count",
+            "frame_duration_ms",
             "moderation",
             "n",
             "output_compression",
             "output_format",
             "quality",
             "size",
+            "svg",
             "user",
         ]
 
@@ -43,8 +52,11 @@ class GPTImageGenerationConfig(BaseImageGenerationConfig):
         drop_params: bool,
     ) -> dict:
         supported_params: Final = self.get_supported_openai_params(model)
+        extra_body: Final[Mapping[str, object]] = {
+            k: non_default_params[k] for k in _GPT_IMAGE_EXTRA_BODY_PARAMS if k in non_default_params
+        }
         for k in non_default_params:
-            if k not in optional_params:
+            if k not in optional_params and k not in extra_body:
                 if k in supported_params:
                     optional_params[k] = non_default_params[k]
                 elif drop_params:
@@ -54,6 +66,8 @@ class GPTImageGenerationConfig(BaseImageGenerationConfig):
                         f"Parameter {k} is not supported for model {model}. Supported parameters are {supported_params}. Set drop_params=True to drop unsupported parameters."
                     )
 
+        if extra_body:
+            optional_params["extra_body"] = extra_body  # rebind-ok: same in-place contract as the loop above
         return optional_params
 
     def transform_image_generation_response(

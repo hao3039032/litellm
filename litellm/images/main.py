@@ -1,7 +1,7 @@
 import asyncio
 import contextvars
 import importlib
-from collections.abc import Collection, Coroutine, Mapping
+from collections.abc import Collection, Coroutine, Mapping, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Final, Literal, cast, get_type_hints, overload
 
@@ -856,6 +856,7 @@ def image_edit(
     prompt: str | None = None,
     model: str | None = None,
     mask: str | None = None,
+    markup: FileTypes | Sequence[FileTypes] | None = None,
     n: int | None = None,
     quality: str | ImageGenerationRequestQuality | None = None,
     response_format: str | None = None,
@@ -1137,6 +1138,7 @@ async def aimage_edit(
     model: str,
     prompt: str,
     mask: str | None = None,
+    markup: FileTypes | Sequence[FileTypes] | None = None,
     n: int | None = None,
     quality: str | ImageGenerationRequestQuality | None = None,
     response_format: str | None = None,
@@ -1180,6 +1182,7 @@ async def aimage_edit(
             image=images,
             prompt=prompt,
             mask=mask,
+            markup=markup,
             model=model,
             n=n,
             quality=quality,

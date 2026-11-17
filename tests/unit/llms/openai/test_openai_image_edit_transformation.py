@@ -311,3 +311,51 @@ def test_input_fidelity_passes_through_optional_param_filter():
     assert filtered["input_fidelity"] == "low"
     assert filtered["quality"] == "high"
     assert "unknown_param" not in filtered
+
+
+def test_get_supported_openai_params_includes_markup(
+    image_edit_config: OpenAIImageEditConfig,
+):
+    """markup is a gpt-image multipart file, so it must survive the supported-params gate"""
+    assert "markup" in image_edit_config.get_supported_openai_params(model="gpt-image-2.6")
+
+
+def test_transform_image_edit_request_sends_markup_as_file_part(
+    image_edit_config: OpenAIImageEditConfig,
+):
+    """markup must leave the json data and ride the multipart files list like mask does"""
+    markup = b"fake_markup_png_data"
+
+    data, files = image_edit_config.transform_image_edit_request(
+        model="gpt-image-2.6",
+        prompt="highlight the circle",
+        image=b"fake_image_data",
+        image_edit_optional_request_params={"markup": markup, "size": "1024x1024"},
+        litellm_params=GenericLiteLLMParams(),
+        headers={},
+    )
+
+    assert "markup" not in data
+    markup_parts = [f for f in files if f[0] == "markup"]
+    assert markup_parts == [("markup", ("markup.png", markup, "image/png"))]
+
+
+def test_transform_image_edit_request_accepts_single_element_markup_list(
+    image_edit_config: OpenAIImageEditConfig,
+):
+    """the proxy endpoint hands files over as a one-element list, first element is used"""
+    markup = BytesIO(b"fake_markup_png_data")
+
+    data, files = image_edit_config.transform_image_edit_request(
+        model="gpt-image-2.6",
+        prompt="highlight the circle",
+        image=b"fake_image_data",
+        image_edit_optional_request_params={"markup": [markup]},
+        litellm_params=GenericLiteLLMParams(),
+        headers={},
+    )
+
+    assert "markup" not in data
+    markup_parts = [f for f in files if f[0] == "markup"]
+    assert len(markup_parts) == 1
+    assert markup_parts[0][1][1] is markup

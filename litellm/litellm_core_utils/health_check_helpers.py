@@ -338,7 +338,7 @@ class HealthCheckHelpers:
             ),
             "image_edit": lambda: HealthCheckHelpers._image_edit_health_check(
                 edit_request=lambda: litellm.aimage_edit(
-                    **_filter_model_params(model_params=model_params),
+                    **_filter_model_params(model_params=model_params),  # pyright: ignore[reportUnknownArgumentType]  # dynamic forwarder: model params spread at runtime
                     image=get_image_file_for_health_check(),
                     prompt=IMAGE_EDIT_HEALTH_CHECK_PROMPT,
                 ),

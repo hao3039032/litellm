@@ -1,6 +1,6 @@
 from typing import Literal
 
-from typing_extensions import TypedDict
+from typing_extensions import ReadOnly, TypedDict
 
 from litellm.types.utils import FileTypes
 
@@ -15,6 +15,7 @@ class ImageEditOptionalRequestParams(TypedDict, total=False):
     background: Literal["transparent", "opaque", "auto"] | None
     input_fidelity: Literal["high", "low"] | None
     mask: str | None
+    markup: ReadOnly[FileTypes | None]
     n: int | None
     output_compression: int | None
     output_format: Literal["png", "jpeg", "webp"] | None

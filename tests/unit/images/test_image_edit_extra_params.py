@@ -5,6 +5,8 @@ Regression tests for https://github.com/BerriAI/litellm/issues/36493
 (e.g. seed) and the extra_body escape hatch, unlike /v1/images/generations.
 """
 
+import io
+
 import httpx
 import pytest
 
@@ -29,6 +31,15 @@ def _multipart_text_fields(content_type: str, body: bytes) -> dict:
         part.split(b'name="')[1].split(b'"')[0].decode(): part.partition(b"\r\n\r\n")[2].rstrip(b"\r\n-").decode()
         for part in body.split(b"--" + boundary)
         if b'name="' in part and b"filename=" not in part
+    }
+
+
+def _multipart_file_parts(content_type: str, body: bytes) -> dict:
+    boundary = content_type.split("boundary=")[1].encode()
+    return {
+        part.split(b'name="')[1].split(b'"')[0].decode(): part.partition(b"\r\n\r\n")[2].rstrip(b"\r\n")
+        for part in body.split(b"--" + boundary)
+        if b'name="' in part and b"filename=" in part
     }
 
 
@@ -139,6 +150,29 @@ def test_image_edit_forwards_scalar_array_as_repeated_fields():
     body = captured["body"]
     assert body.count(b'name="loras"') == 3
     assert b"style_a" in body and b"style_b" in body and b"style_c" in body
+
+
+@pytest.mark.parametrize("file_field, part_name", [("image", "image[]"), ("mask", "mask"), ("markup", "markup")])
+def test_image_edit_extra_body_cannot_stringify_a_file_field(file_field, part_name):
+    """extra_body is flattened into text form fields, so a file-named key there used to overwrite
+    the real upload and reach the provider as that file object's repr instead of its bytes."""
+    captured = {}
+    client = HTTPHandler(client=httpx.Client(transport=httpx.MockTransport(_capture_image_edit_request(captured))))
+
+    litellm.image_edit(
+        model="openai/gpt-image-1",
+        prompt="add a hat",
+        api_key="sk-test",
+        api_base="https://edit.example/v1",
+        client=client,
+        extra_body={file_field: io.BytesIO(b"\x89PNG\r\n\x1a\nother"), "quality_level": "high"},
+        **{file_field: io.BytesIO(b"\x89PNG\r\n\x1a\nupload")},
+    )
+
+    body = captured["body"]
+    assert file_field not in _multipart_text_fields(captured["content_type"], body)
+    assert _multipart_file_parts(captured["content_type"], body)[part_name] == b"\x89PNG\r\n\x1a\nupload"
+    assert _multipart_text_fields(captured["content_type"], body)["quality_level"] == "high"
 
 
 @pytest.mark.asyncio

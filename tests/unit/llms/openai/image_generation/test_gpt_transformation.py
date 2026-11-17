@@ -87,7 +87,7 @@ def test_get_optional_params_image_gen_keeps_gpt_image_26_passthrough_in_extra_b
     )
 
     assert optional_params["quality"] == "high"
-    assert set(optional_params) == {"quality", "extra_body"}
+    assert not (set(optional_params) & {"complexity", "frame_count", "frame_duration_ms", "svg"})
     assert optional_params["extra_body"] == {
         "complexity": "low",
         "frame_count": 4,

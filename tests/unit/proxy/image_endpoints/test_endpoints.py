@@ -221,6 +221,21 @@ def test_image_edit_markup_file_reaches_the_provider_as_read_buffers(monkeypatch
     assert [buffer.name for buffer in captured["markup"]] == ["notes.png"]
 
 
+def test_image_edit_markup_as_a_string_never_reaches_the_provider(monkeypatch):
+    """A plain `markup` form value cannot become a file part, so the request is refused before the provider call"""
+    captured: dict[str, Any] = {}
+
+    response = _image_edit_client(monkeypatch, captured).post(
+        "/v1/images/edits",
+        files={"image": ("tree.png", b"\x89PNG\r\n\x1a\ntree", "image/png")},
+        data={"model": "gpt-image-2.6", "prompt": "add a hat", "markup": "<svg />"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "markup" in response.text
+    assert captured == {}
+
+
 def test_image_edit_multipart_n_reaches_the_provider_as_an_int(monkeypatch):
     """A multipart `n` must not arrive as the string Starlette parsed it into."""
     captured: Dict[str, Any] = {}

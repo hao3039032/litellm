@@ -817,6 +817,7 @@ def image_variation(
 
 
 _IMAGE_EDIT_OPENAI_PARAMS: Final = frozenset(get_type_hints(ImageEditOptionalRequestParams))
+_IMAGE_EDIT_FILE_FIELDS: Final = frozenset({"image", "mask", "markup"})
 _DROP_PARAM_KWARGS: Final = frozenset({"drop_params", "additional_drop_params"})
 _ADDITIONAL_DROP_PARAMS: Final = TypeAdapter[tuple[str, ...]](tuple[str, ...])
 
@@ -1013,14 +1014,19 @@ def image_edit(
             or custom_llm_provider in litellm.openai_compatible_providers
         ):
             dropped_form_params: Final = header_auth_params(custom_llm_provider)
+            extra_body_form_fields: Final = (
+                {
+                    key: value
+                    for key, value in extra_body.items()
+                    if key not in dropped_form_params and key not in _IMAGE_EDIT_FILE_FIELDS
+                }
+                if isinstance(extra_body, dict)
+                else None
+            )
             image_edit_request_params.update(
                 flatten_form_field_values(
                     {key: value for key, value in non_default_params.items() if key not in dropped_form_params},
-                    (
-                        {key: value for key, value in extra_body.items() if key not in dropped_form_params}
-                        if isinstance(extra_body, dict)
-                        else None
-                    ),
+                    extra_body_form_fields,
                 )
             )
 

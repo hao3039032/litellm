@@ -340,6 +340,38 @@ def test_transform_image_edit_request_sends_markup_as_file_part(
     assert markup_parts == [("markup", ("markup.png", markup, "image/png"))]
 
 
+def test_markup_passes_through_optional_param_filter():
+    """markup must survive get_requested_image_edit_optional_param, unknown keys still get dropped"""
+    params = {
+        "markup": b"fake_markup_png_data",
+        "quality": "high",
+        "unknown_param": "should_be_dropped",
+    }
+
+    filtered = ImageEditRequestUtils.get_requested_image_edit_optional_param(params)
+
+    assert filtered["markup"] == b"fake_markup_png_data"
+    assert filtered["quality"] == "high"
+    assert "unknown_param" not in filtered
+
+
+def test_transform_image_edit_request_sends_no_markup_part_for_empty_list(
+    image_edit_config: OpenAIImageEditConfig,
+):
+    """an empty markup list means no markup file, not a pseudo part carrying the empty list"""
+    data, files = image_edit_config.transform_image_edit_request(
+        model="gpt-image-2.6",
+        prompt="highlight the circle",
+        image=b"fake_image_data",
+        image_edit_optional_request_params={"markup": []},
+        litellm_params=GenericLiteLLMParams(),
+        headers={},
+    )
+
+    assert "markup" not in data
+    assert [f[0] for f in files] == ["image[]"]
+
+
 def test_transform_image_edit_request_accepts_single_element_markup_list(
     image_edit_config: OpenAIImageEditConfig,
 ):

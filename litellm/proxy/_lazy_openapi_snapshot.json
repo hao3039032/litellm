@@ -24036,6 +24036,21 @@
               ],
               "title": "Image[]"
             },
+            "markup": {
+              "anyOf": [
+                {
+                  "items": {
+                    "contentMediaType": "application/octet-stream",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Markup"
+            },
             "mask": {
               "anyOf": [
                 {

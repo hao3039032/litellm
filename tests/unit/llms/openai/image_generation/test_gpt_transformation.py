@@ -83,12 +83,15 @@ def test_get_optional_params_image_gen_keeps_gpt_image_26_passthrough_in_extra_b
         frame_duration_ms=500,
         svg=True,
         quality="high",
+        extra_body={"x_custom": 1, "svg": False},
     )
 
     assert optional_params["quality"] == "high"
+    assert set(optional_params) == {"quality", "extra_body"}
     assert optional_params["extra_body"] == {
         "complexity": "low",
         "frame_count": 4,
         "frame_duration_ms": 500,
-        "svg": True,
+        "svg": False,
+        "x_custom": 1,
     }

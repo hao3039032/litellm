@@ -66,12 +66,17 @@ def test_image_generation_forwards_gpt_image_26_passthrough_body_fields(gateway:
         {"svg": True},
     ),
 )
-def test_image_generation_rejects_no_single_gpt_image_26_passthrough_field(
+def test_image_generation_accepts_each_gpt_image_26_passthrough_field_alone(
     gateway: Gateway, passthrough: dict[str, JsonValue]
 ) -> None:
-    """Each passthrough field alone must also clear validation, not just the full set"""
+    """Each passthrough field alone must land in the upstream json body, not just the full set"""
 
     def respond(request: Request) -> Reply:
+        assert _JSON_OBJECT.validate_json(request.body) == {
+            "model": "gpt-image-2.6",
+            "prompt": _PROMPT,
+            **passthrough,
+        }
         return Reply(body=json.dumps({"created": 1700000000, "data": [{"b64_json": "aW1n"}]}).encode())
 
     with wire_server(respond) as wire, gateway.scenario() as scenario:

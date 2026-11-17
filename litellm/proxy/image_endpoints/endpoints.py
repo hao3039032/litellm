@@ -339,7 +339,7 @@ async def image_edit_api(
     if markup_files:
         data["markup"] = markup_files
 
-    for _field in ("image", "mask"):
+    for _field in ("image", "mask", "markup"):
         if _field in data and isinstance(data[_field], str):
             raise HTTPException(
                 status_code=422,

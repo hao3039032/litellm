@@ -148,7 +148,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
                 else:
                     files_list.append(("mask", ("mask.png", _mask, mask_content_type)))
 
-        _markup_file: Final = _markup[0] if isinstance(_markup, list) and _markup else _markup
+        _markup_file: Final = (_markup[0] if _markup else None) if isinstance(_markup, list) else _markup
         if _markup_file is not None:
             markup_content_type: Final[str] = ImageEditRequestUtils.get_image_content_type(_markup_file)
             if isinstance(_markup_file, BufferedReader):

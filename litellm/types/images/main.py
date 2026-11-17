@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Literal
 
 from typing_extensions import ReadOnly, TypedDict
@@ -15,7 +16,7 @@ class ImageEditOptionalRequestParams(TypedDict, total=False):
     background: Literal["transparent", "opaque", "auto"] | None
     input_fidelity: Literal["high", "low"] | None
     mask: str | None
-    markup: ReadOnly[FileTypes | None]
+    markup: ReadOnly[FileTypes | Sequence[FileTypes] | None]
     n: int | None
     output_compression: int | None
     output_format: Literal["png", "jpeg", "webp"] | None

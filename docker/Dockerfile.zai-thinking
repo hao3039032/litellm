@@ -33,6 +33,10 @@ COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/
 COPY litellm/router_rust/invoke/streaming.py /app/.venv/lib/python3.13/site-packages/litellm/router_rust/invoke/streaming.py
 COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/hooks/responses_id_security.py
 
+COPY litellm/google_genai/main.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/main.py
+COPY litellm/google_genai/adapters/handler.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/adapters/handler.py
+COPY litellm/types/google_genai/adapters.py /app/.venv/lib/python3.13/site-packages/litellm/types/google_genai/adapters.py
+
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
 LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.109.0 with custom ZAI, client header, image, and Responses API fixes"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"

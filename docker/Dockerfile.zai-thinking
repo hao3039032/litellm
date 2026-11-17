@@ -16,6 +16,13 @@ COPY litellm/llms/openai/image_edit/transformation.py /app/.venv/lib/python3.13/
 COPY litellm/utils.py /app/.venv/lib/python3.13/site-packages/litellm/utils.py
 COPY docker/strip_images.py /app/strip_images.py
 
+COPY litellm/images/main.py /app/.venv/lib/python3.13/site-packages/litellm/images/main.py
+COPY litellm/proxy/image_endpoints/endpoints.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/image_endpoints/endpoints.py
+COPY litellm/llms/openai/image_generation/gpt_transformation.py /app/.venv/lib/python3.13/site-packages/litellm/llms/openai/image_generation/gpt_transformation.py
+COPY litellm/types/llms/openai.py /app/.venv/lib/python3.13/site-packages/litellm/types/llms/openai.py
+COPY litellm/litellm_core_utils/health_check_helpers.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/health_check_helpers.py
+COPY litellm/proxy/_lazy_openapi_snapshot.json /app/.venv/lib/python3.13/site-packages/litellm/proxy/_lazy_openapi_snapshot.json
+
 COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
 COPY litellm/litellm_core_utils/litellm_logging.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/litellm_logging.py
 COPY litellm/google_genai/streaming_iterator.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/streaming_iterator.py

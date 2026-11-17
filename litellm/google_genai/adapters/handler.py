@@ -69,6 +69,11 @@ class GenerateContentToCompletionHandler:
                 completion_kwargs["proxy_server_request"] = extra_kwargs["proxy_server_request"]
             if "litellm_metadata" in extra_kwargs:
                 completion_kwargs["litellm_metadata"] = extra_kwargs["litellm_metadata"]
+            # The attached per-user Copilot session owns the tenant endpoint and
+            # bearer token; without it the inner completion falls back to the
+            # shared device login, which cannot run inside the proxy.
+            if "github_copilot_user_session" in extra_kwargs:
+                completion_kwargs["github_copilot_user_session"] = extra_kwargs["github_copilot_user_session"]
 
         if stream:
             completion_kwargs["stream"] = stream

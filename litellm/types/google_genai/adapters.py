@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from openai.types.chat import ChatCompletionStreamOptionsParam
 from typing_extensions import ReadOnly, TypedDict
@@ -8,6 +9,9 @@ from litellm.types.llms.openai import (
     ChatCompletionToolChoiceStringValues,
     ChatCompletionToolParam,
 )
+
+if TYPE_CHECKING:
+    from litellm.llms.github_copilot.per_user_auth import GithubCopilotUserSession
 
 
 class GenerateContentCompletionKwargs(TypedDict, total=False):
@@ -25,3 +29,4 @@ class GenerateContentCompletionKwargs(TypedDict, total=False):
     stream_options: ReadOnly[ChatCompletionStreamOptionsParam]
     extra_headers: dict[str, str] | None
     proxy_server_request: dict[str, object] | None
+    github_copilot_user_session: ReadOnly["GithubCopilotUserSession"]

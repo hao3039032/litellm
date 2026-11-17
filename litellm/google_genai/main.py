@@ -11,6 +11,9 @@ from litellm.constants import request_timeout
 
 # Import the adapter for fallback to completion format
 from litellm.google_genai.adapters.handler import GenerateContentToCompletionHandler
+from litellm.litellm_core_utils.get_llm_provider_logic import (
+    resolve_model_and_provider_for_metadata,
+)
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.google_genai.transformation import (
     BaseGoogleGenAIGenerateContentConfig,
@@ -136,6 +139,7 @@ class GenerateContentHelper:
             custom_llm_provider=custom_llm_provider,
             api_base=litellm_params.api_base,
             api_key=litellm_params.api_key,
+            litellm_params=litellm_params,
         )
 
         if litellm_params.custom_llm_provider is None:
@@ -265,7 +269,7 @@ async def agenerate_content(
             config = kwargs.pop("generationConfig")
         # get custom llm provider so we can use this for mapping exceptions
         if custom_llm_provider is None:
-            _, custom_llm_provider, _, _ = litellm.get_llm_provider(
+            _, custom_llm_provider = resolve_model_and_provider_for_metadata(
                 model=model,
                 custom_llm_provider=custom_llm_provider,
             )
@@ -426,8 +430,8 @@ async def agenerate_content_stream(
             config = kwargs.pop("generationConfig")
         # get custom llm provider so we can use this for mapping exceptions
         if custom_llm_provider is None:
-            _, custom_llm_provider, _, _ = litellm.get_llm_provider(
-                model=model, api_base=local_vars.get("base_url", None)
+            _, custom_llm_provider = resolve_model_and_provider_for_metadata(
+                model=model,
             )
 
         # Setup the call

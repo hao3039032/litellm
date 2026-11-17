@@ -7,7 +7,7 @@ import pytest
 import litellm
 
 # Import at the top to make the patch work correctly
-from litellm import ModelResponse, completion
+from litellm import ModelResponse, acompletion, completion
 from litellm.exceptions import AuthenticationError
 from litellm.llms.github_copilot.chat.transformation import GithubCopilotConfig
 from litellm.llms.github_copilot.common_utils import (
@@ -939,3 +939,60 @@ def test_transform_response_carries_upstream_usage():
     assert result.usage.prompt_tokens == 11
     assert result.usage.completion_tokens == 7
     assert result.usage.total_tokens == 18
+
+
+async def test_caller_extra_headers_keep_copilot_auth_headers_on_the_wire():
+    """Caller extra_headers (e.g. a forwarded User-Agent) must not displace the
+    Copilot auth headers the dispatch prepares; upstream rejects requests
+    without Editor-Version."""
+    from openai import AsyncOpenAI
+
+    from litellm.llms.github_copilot.per_user_auth import GithubCopilotUserSession
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-wire",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gemini-4-hydrogen",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "OK"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    client = AsyncOpenAI(
+        api_key="tid=placeholder",
+        base_url="https://api.individual.githubcopilot.com",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    session = GithubCopilotUserSession(
+        token="tid=session-token",
+        api_base="https://api.individual.githubcopilot.com",
+    )
+
+    response = await acompletion(
+        model="github_copilot/gemini-4-hydrogen",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10,
+        client=client,
+        extra_headers={"User-Agent": "pi/1.5.2"},
+        github_copilot_user_session=session,
+        litellm_credential_name="Copilot-Test",
+        github_copilot_auth_type="per_user_oauth",
+    )
+
+    assert response.choices[0].message.content == "OK"
+    assert captured["headers"].get("editor-version"), "Copilot auth headers must survive caller extra_headers"
+    assert captured["headers"].get("authorization") == "Bearer tid=session-token"
+    assert "pi/1.5.2" in captured["headers"].get("user-agent", "")

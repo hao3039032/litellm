@@ -761,7 +761,11 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 )
 
             if headers:
-                inference_params["extra_headers"] = headers
+                prepared_headers: Final = inference_params.get("extra_headers")
+                inference_params["extra_headers"] = {
+                    **(prepared_headers if isinstance(prepared_headers, dict) else {}),
+                    **headers,
+                }
             if model is None or messages is None:
                 raise OpenAIError(status_code=422, message="Missing model or messages")
 

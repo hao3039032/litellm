@@ -1,5 +1,5 @@
-# Custom patches on upstream v1.109.0, including the OpenCode session fallback.
-FROM ghcr.io/berriai/litellm-database:v1.109.0@sha256:5b645ba56f839a402905fed102b35f1c2dcfb190fd2f0d8cbc0f850ed442a9a4
+# Custom patches on upstream v1.110.2, including the OpenCode session fallback.
+FROM ghcr.io/berriai/litellm-database:v1.110.2@sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff
 
 RUN /app/.venv/bin/python -m ensurepip \
     && /app/.venv/bin/python -m pip install --no-cache-dir socksio==1.0.0 aiohttp-socks==0.12.0
@@ -28,7 +28,6 @@ COPY litellm/litellm_core_utils/litellm_logging.py /app/.venv/lib/python3.13/sit
 COPY litellm/google_genai/streaming_iterator.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/streaming_iterator.py
 COPY litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py
 COPY litellm/proxy/pass_through_endpoints/streaming_handler.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/pass_through_endpoints/streaming_handler.py
-COPY litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py /app/.venv/lib/python3.13/site-packages/litellm/router_utils/pre_call_checks/encrypted_content_affinity_check.py
 COPY litellm/responses/utils.py /app/.venv/lib/python3.13/site-packages/litellm/responses/utils.py
 COPY litellm/router_rust/invoke/streaming.py /app/.venv/lib/python3.13/site-packages/litellm/router_rust/invoke/streaming.py
 COPY litellm/proxy/hooks/responses_id_security.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/hooks/responses_id_security.py
@@ -39,6 +38,6 @@ COPY litellm/google_genai/adapters/handler.py /app/.venv/lib/python3.13/site-pac
 COPY litellm/types/google_genai/adapters.py /app/.venv/lib/python3.13/site-packages/litellm/types/google_genai/adapters.py
 
 LABEL org.opencontainers.image.title="litellm-database (zai/glm thinking patch)"
-LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.109.0 with custom ZAI, client header, image, and Responses API fixes"
+LABEL org.opencontainers.image.description="Fork of berriai/litellm v1.110.2 with custom ZAI, client header, image, and Responses API fixes"
 LABEL org.opencontainers.image.source="https://github.com/hao3039032/litellm/tree/lw-litellm-staging"
-LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.109.0"
+LABEL org.opencontainers.image.base.name="ghcr.io/berriai/litellm-database:v1.110.2"

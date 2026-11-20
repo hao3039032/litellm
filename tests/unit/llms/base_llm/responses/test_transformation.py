@@ -1420,6 +1420,61 @@ async def test_bridged_responses_fallback_surfaces_the_primary_error_after_a_ser
         litellm.get_model_info.cache_clear()
 
 
+def _openai_chat_stream_cut_after_annotation(preamble: str) -> httpx.Response:
+    def chunk(delta: Mapping[str, object]) -> Mapping[str, object]:
+        return {
+            "id": "chatcmpl-primary",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-6-astra",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        }
+
+    citation: Final = {
+        "type": "url_citation",
+        "url_citation": {
+            "start_index": 0,
+            "end_index": len(preamble),
+            "title": "Docs",
+            "url": "https://example.invalid/docs",
+        },
+    }
+    payloads: Final = (
+        chunk({"role": "assistant", "content": preamble}),
+        chunk({"annotations": [citation]}),
+        {"error": {"type": "server_error", "code": "internal_error", "message": "interrupted"}},
+    )
+    return httpx.Response(
+        200,
+        headers={"content-type": "text/event-stream"},
+        content="".join(f"data: {json.dumps(payload)}\n\n" for payload in payloads),
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridged_responses_fallback_continues_after_text_carrying_a_citation_annotation(
+    respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    primary: Final = respx_mock.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=_openai_chat_stream_cut_after_annotation("The docs ")
+    )
+    fallback: Final = respx_mock.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=_anthropic_stream("cover setup.")
+    )
+    router: Final = _primary_with_fallback("anthropic/claude-opus-5-5")
+    try:
+        stream: Final = await router.aresponses(
+            model="primary", input="What do the docs cover?", stream=True, use_chat_completions_api=True
+        )
+        events: Final = tuple([event async for event in stream])
+        assert _streamed_text(events) == "The docs cover setup."
+        assert ResponsesAPIStreamEvents.OUTPUT_TEXT_ANNOTATION_ADDED in {event.type for event in events}
+        assert primary.call_count == fallback.call_count == 1
+    finally:
+        router.discard()
+
+
 def _openai_completed(model: str) -> Mapping[str, object]:
     return {
         "type": "response.completed", "sequence_number": 1,

@@ -1315,10 +1315,13 @@ class TestGetRequestBody:
 
 
 class TestNumericFormFields:
-    def test_image_edit_schema_yields_only_n(self):
+    def test_image_edit_schema_yields_n_and_output_compression(self):
         from litellm.types.images.main import ImageEditRequestParams
 
-        assert dict(numeric_form_fields(get_type_hints(ImageEditRequestParams))) == {"n": int}
+        assert dict(numeric_form_fields(get_type_hints(ImageEditRequestParams))) == {
+            "n": int,
+            "output_compression": int,
+        }
 
     def test_qualifiers_and_optionality_are_unwrapped(self):
         from typing import Optional

@@ -26,6 +26,7 @@ COPY litellm/proxy/_lazy_openapi_snapshot.json /app/.venv/lib/python3.13/site-pa
 COPY litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py
 COPY litellm/litellm_core_utils/litellm_logging.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/litellm_logging.py
 COPY litellm/litellm_core_utils/streaming_handler.py /app/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/streaming_handler.py
+COPY litellm/exceptions.py /app/.venv/lib/python3.13/site-packages/litellm/exceptions.py
 COPY litellm/llms/anthropic/chat/handler.py /app/.venv/lib/python3.13/site-packages/litellm/llms/anthropic/chat/handler.py
 COPY litellm/google_genai/streaming_iterator.py /app/.venv/lib/python3.13/site-packages/litellm/google_genai/streaming_iterator.py
 COPY litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py /app/.venv/lib/python3.13/site-packages/litellm/proxy/pass_through_endpoints/llm_provider_handlers/gemini_passthrough_logging_handler.py

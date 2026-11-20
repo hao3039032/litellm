@@ -1720,7 +1720,8 @@ def wrap_responses_stream(  # noqa: C901  # one function per Python wrapper it p
             )
             if response_id_exposed:
                 _raise_released_stream_error(attempt, e)
-            if forwarded_non_text_output or e.emitted_disqualifying_content:
+            # Annotations disqualify a chat prefill but stay text on Responses, so only a started server tool blocks here.
+            if forwarded_non_text_output or e.server_execution_started:
                 _raise_original_mid_stream_error(e)
             async with contextlib.aclosing(
                 _responses_recover_stream_error(

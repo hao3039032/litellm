@@ -472,6 +472,7 @@ class CustomStreamWrapper:
         self.complete_response = ""
         self.response_uptil_now = ""
         self._emitted_disqualifying_content = False
+        self._server_execution_started = False
         _model_info: Final[dict] = litellm_params.model_info or {}
 
         _api_base: Final = get_api_base(
@@ -626,6 +627,7 @@ class CustomStreamWrapper:
     def _record_started_server_execution(self, stream: object) -> None:
         if getattr(stream, "server_execution_started", False) is True:
             self._emitted_disqualifying_content = True
+            self._server_execution_started = True
 
     def close(self) -> None:
         stream_to_close: Final = cast(object, self.completion_stream)  # cast-ok: completion_stream is untyped
@@ -2895,6 +2897,7 @@ class CustomStreamWrapper:
                 generated_content=self.response_uptil_now,
                 is_pre_first_chunk=not self.sent_first_chunk,
                 emitted_disqualifying_content=self._emitted_disqualifying_content or e.emitted_disqualifying_content,
+                server_execution_started=self._server_execution_started or e.server_execution_started,
             )
 
         # Map to OpenAI exception format. Some providers' mappers (e.g.
@@ -2950,6 +2953,7 @@ class CustomStreamWrapper:
             generated_content=self.response_uptil_now,
             is_pre_first_chunk=not self.sent_first_chunk,
             emitted_disqualifying_content=self._emitted_disqualifying_content,
+            server_execution_started=self._server_execution_started,
         )
 
     @staticmethod

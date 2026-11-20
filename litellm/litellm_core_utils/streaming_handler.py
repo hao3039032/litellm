@@ -623,8 +623,13 @@ class CustomStreamWrapper:
         """
         self._restore_consumer_correlation_context(guarded=True)
 
+    def _record_started_server_execution(self, stream: object) -> None:
+        if getattr(stream, "server_execution_started", False) is True:
+            self._emitted_disqualifying_content = True
+
     def close(self) -> None:
         stream_to_close: Final = cast(object, self.completion_stream)  # cast-ok: completion_stream is untyped
+        self._record_started_server_execution(stream_to_close)
         self.completion_stream = None
         self._closed = True
         close_stream: Final = getattr(stream_to_close, "close", None)
@@ -645,6 +650,7 @@ class CustomStreamWrapper:
         self._closed = True
         if self.completion_stream is not None:
             stream_to_close: Final = self.completion_stream
+            self._record_started_server_execution(stream_to_close)
             self.completion_stream = None
             # Shield from anyio cancellation so cleanup awaits can complete.
             # Without this, CancelledError is thrown into every await during

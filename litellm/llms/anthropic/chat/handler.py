@@ -773,6 +773,10 @@ class ModelResponseIterator:
         self._container_id: str | None = None
 
     @property
+    def server_execution_started(self) -> bool:
+        return self._current_server_tool_id is not None or bool(self._server_tool_calls)
+
+    @property
     def accumulated_json(self) -> str:
         return self._json_buffer.snapshot()
 

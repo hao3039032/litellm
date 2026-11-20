@@ -1374,7 +1374,15 @@ async def test_bridged_responses_fallback_surfaces_the_primary_error_once_the_cu
 async def test_bridged_responses_fallback_surfaces_the_primary_error_after_a_server_run_tool_search(
     respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from litellm.responses.litellm_completion_transformation.tool_search import ANTHROPIC_TOOL_SEARCH_TOOL_TYPE
+
     monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    primary_model: Final = "anthropic/claude-tool-search-test-model"
+    litellm.register_model(
+        {primary_model: {"litellm_provider": "anthropic", "mode": "chat", "supports_tool_search": True}},
+        persist_across_reloads=False,
+    )
+    litellm.get_model_info.cache_clear()
     provider: Final = respx_mock.post("https://api.anthropic.com/v1/messages").mock(
         side_effect=[
             _anthropic_stream_cut_mid_tool_call(
@@ -1386,7 +1394,7 @@ async def test_bridged_responses_fallback_surfaces_the_primary_error_after_a_ser
     )
     router: Final = Router(
         model_list=[
-            {"model_name": "primary", "litellm_params": {"model": "anthropic/claude-primary", "api_key": "synthetic"}},
+            {"model_name": "primary", "litellm_params": {"model": primary_model, "api_key": "synthetic"}},
             {"model_name": "fallback", "litellm_params": {"model": "anthropic/claude-opus-5-5", "api_key": "synthetic"}},
         ],
         fallbacks=[{"primary": ["fallback"]}],
@@ -1405,8 +1413,11 @@ async def test_bridged_responses_fallback_surfaces_the_primary_error_after_a_ser
         with pytest.raises(litellm.InternalServerError, match="interrupted"):
             [event async for event in stream]
         assert provider.call_count == 1
+        sent_tools: Final = json.loads(provider.calls.last.request.content)["tools"]
+        assert ANTHROPIC_TOOL_SEARCH_TOOL_TYPE in {tool.get("type") for tool in sent_tools}
     finally:
         router.discard()
+        litellm.get_model_info.cache_clear()
 
 
 def _openai_completed(model: str) -> Mapping[str, object]:
